@@ -277,30 +277,6 @@ char *disassemble_instruction(Arena *arena, Instruction *inst) {
 }
 	
 /*
-char *effective_address(Arena *arena, Instruction *inst) {
-	char *addr = arena_alloc_zeroed(arena, OPERAND_BUF_SIZE);
-	char *buf_ptr = addr;
-
-	if (imm_to_rm(inst) && !is_reg_mode(inst->mode)) {
-		buf_printf(&buf_ptr, "%s ", inst->wide ? "word" : "byte");
-	}
-
-	if (is_direct_address(inst)) {
-		buf_printf(&buf_ptr, "[%d]", inst->disp);
-	} else {
-		buf_printf(&buf_ptr, "[%s", effective_address_table[inst->r_m]);
-
-		if (inst->mode == 0) {
-			buf_printf(&buf_ptr, "]");
-		} else  {
-			assert(inst->mode == 1 || inst->mode == 2);
-			buf_printf(&buf_ptr, " + %d]", inst->disp);
-		} 
-	}
-
-	return addr;
-}
-
 char *disassemble_conditional_jump(Arena *arena, Instruction *inst) {
 	// FIXME: have to recompute the full opcode since we are only storing 6 bits of opcode directly
 	// should probably store 8 bit opcode all the time, but there are a lot of places where the 6 
@@ -314,81 +290,7 @@ char *disassemble_conditional_jump(Arena *arena, Instruction *inst) {
 	snprintf(asm_inst, len, "%s %d", conditional_jump_names[full_opcode], displacement);
 	return asm_inst;
 }
-
-
-
-
-
-char *disassemble_instruction(Arena *arena, Instruction *inst) {
-	uint8_t full_opcode = ((uint8_t)inst->opcode << 2) | inst->dir << 1 | inst->wide;
-	if (is_conditional_jump(full_opcode)) {
-		return disassemble_conditional_jump(arena, inst);
-	}
-
-	char *src, *dst;
-
-	// mov immediate to register
-	if ((inst->opcode & 0x3C) == 0x2C) {
-		// NOTE: max immediate is 65536, so 8 is enough chars
-		src = arena_alloc_zeroed(arena, 8);
-		snprintf(src, 8, "%d", inst->data);
-		dst = reg_name(inst->wide, inst->reg);
-
-	// register/memory to/from register
-	} else if (rm_to_from_reg(inst)) {
-		if (inst->dir == 0) {
-			// src is reg, dst is r/m
-			src = reg_name(inst->wide, inst->reg);
-			dst = is_reg_mode(inst->mode)
-					? reg_name(inst->wide, inst->r_m)
-					: effective_address(arena, inst);
-		} else {
-			// src is r/m, dst is reg
-			src = is_reg_mode(inst->mode)
-					? reg_name(inst->wide, inst->r_m)
-					: effective_address(arena, inst);
-			dst = reg_name(inst->wide, inst->reg);
-		}
-
-	// immediate to register/memory
-	} else if (imm_to_rm(inst)) {
-		// NOTE: max immediate is 65536, so 8 is enough chars
-		src = arena_alloc_zeroed(arena, 8);
-		snprintf(src, 8, "%d", inst->data);
-		dst = is_reg_mode(inst->mode)
-				? reg_name(inst->wide, inst->r_m)
-				: effective_address(arena, inst);
-
-	// immediate to accumulator
-	} else if (imm_to_acc(inst)) {
-		dst = reg_name(inst->wide, 0); // accumulator
-		src = arena_alloc_zeroed(arena, 8);
-		snprintf(src, 8, "%d", inst->data);
-
-	// memory to accumulator & vice versa
-	} else if (inst->opcode == 0x28) {
-		assert(0);
-	// register/memory to segment register & vice versa
-	} else if (inst->opcode == 0x23) {
-		assert(0);
-	} 
-	
-	int len = 4 + strlen(dst) + 2 + strlen(src) + 1;
-	char *asm_inst = arena_alloc(arena, len);
-
-	if (is_arithmetic(inst)) {
-		int op = imm_to_rm(inst) 
-			? inst->reg 
-			: (inst->opcode >> 1) & 0x7;
-		snprintf(asm_inst, len, "%s %s, %s", arithmetic_ops[op], dst, src);
-	}
-	else
-		snprintf(asm_inst, len, "mov %s, %s", dst, src);
-
-	asm_inst[len] = 0;
-	return asm_inst;
-}
-	*/
+*/
 
 int main(int argc, char **argv) {
 	if (argc != 2) {
