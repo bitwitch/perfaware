@@ -1,24 +1,9 @@
 #include "../common.c"
 #include "instruction_table.c"
 
-#define DISASSEM_BUF_SIZE       1024
+#define DISASSEM_BUF_SIZE       4096
 #define SINGLE_INST_BUF_SIZE    64
 #define OPERAND_BUF_SIZE        32
-
-/*
-typedef struct {
-	uint16_t opcode : 6;
-	uint16_t dir    : 1;
-	uint16_t wide   : 1;
-	uint16_t mode   : 2;
-	uint16_t reg    : 3;
-	uint16_t r_m    : 3;
-
-	uint16_t disp; // displacement
-	uint16_t data; // immediate
-	uint16_t addr; // memory address
-} Instruction;
-*/
 
 typedef uint8_t RegIndex;
 
@@ -69,18 +54,12 @@ char *effective_address_table[8] = {
 	"si", "di", "bp", "bx",
 };
 
-char *arithmetic_ops[] = {
-	[0x0] = "add",
-	[0x5] = "sub",
-	[0x7] = "cmp",
-};
-
-char *conditional_jump_names[] = {
-	[0x70] = "jo",     [0x71] = "jno",   [0x72] = "jb",   [0x73] = "jnb",
-	[0x74] = "je",     [0x75] = "jne",   [0x76] = "jbe",  [0x77] = "ja",
-	[0x78] = "js",     [0x79] = "jns",   [0x7A] = "jp",   [0x7B] = "jnp",
-	[0x7C] = "jl",     [0x7D] = "jnl",   [0x7E] = "jle",  [0x7F] = "jg",
-	[0xE0] = "loopnz", [0xE1] = "loopz", [0xE2] = "loop", [0xE3] = "jcxz",
+char *mnemonics[] = {
+	[OP_MOV] = "mov",
+	[OP_ADD] = "add",
+	[OP_ADC] = "adc",
+    [OP_SUB] = "sub",
+	[OP_CMP] = "cmp",
 };
 
 char *reg_name(uint8_t wide, uint8_t reg) {
@@ -267,7 +246,18 @@ char *operand_to_string(Arena *arena, Operand *operand, bool wide) {
 }
 
 char *disassemble_instruction(Arena *arena, Instruction *inst) {
-	assert(inst->op == OP_MOV);
+	// NOTE: this is just here during development to point out where you need 
+	// to add code when adding ops
+	switch (inst->op) {
+		case OP_MOV:
+		case OP_ADD: case OP_ADC:
+		case OP_SUB: case OP_SBB:
+		case OP_CMP:
+			break;
+		default: 
+			assert(0);
+			break;
+	}
 
 	char *asm_inst = arena_alloc_zeroed(arena, SINGLE_INST_BUF_SIZE);
 	char *buf_ptr = asm_inst;
@@ -275,7 +265,12 @@ char *disassemble_instruction(Arena *arena, Instruction *inst) {
 	char *dst = operand_to_string(arena, &inst->operands[0], inst->wide);
 	char *src = operand_to_string(arena, &inst->operands[1], inst->wide);
 
-	buf_printf(&buf_ptr, "mov %s, %s", dst, src);
+	char *size = "";
+	if (inst->operands[1].kind == OPERAND_IMM && inst->operands[0].kind == OPERAND_MEM) {
+		size = inst->wide ? "word" : "byte";
+	}
+
+	buf_printf(&buf_ptr, "%s %s%s, %s", mnemonics[inst->op], size, dst, src);
 		
 
 	return asm_inst;
