@@ -175,10 +175,8 @@ Instruction decode_instruction(void) {
 				uint8_t data;
 				if (field.num_bits > 0) {
 					data = stream[byte_index] >> (bits_pending - field.num_bits);
-					if (field.num_bits < 8) {
-						uint8_t mask = ~((int8_t)0x80 >> (7 - field.num_bits));
-						data &= mask;
-					}
+					uint8_t mask = 0xFF >> (8 - field.num_bits);
+					data &= mask;
 					bits_pending -= field.num_bits;
 				} else {
 					data = field.value;
