@@ -10,6 +10,7 @@ typedef uint8_t RegIndex;
 typedef enum {
 	OPERAND_NONE,
 	OPERAND_IMM,
+	OPERAND_REL_IMM,
 	OPERAND_REG,
 	OPERAND_MEM,
 } OperandKind;
@@ -44,6 +45,9 @@ uint8_t effective_address_reg_table[2][8] = {
 	{ 0x6, 0x7, 0x6, 0x7, 0x0, 0x0, 0x0, 0x0 }, // offset reg
 };
 
+// NOTE(shaw): maybe collapse this into 1 dimension and use an enum to index it, 
+// so we don't use magic register numbers as indices, but then we lose the ability to 
+// use the direct register encoding to index into this table (table 4.9 from 8086 manual)
 char *regs[2][8] = {
 	{ "al", "cl", "dl", "bl", "ah", "ch", "dh", "bh" },
 	{ "ax", "cx", "dx", "bx", "sp", "bp", "si", "di" },
@@ -55,11 +59,31 @@ char *effective_address_table[8] = {
 };
 
 char *mnemonics[] = {
-	[OP_MOV] = "mov",
-	[OP_ADD] = "add",
-	[OP_ADC] = "adc",
-    [OP_SUB] = "sub",
-	[OP_CMP] = "cmp",
+	[OP_MOV]    = "mov",
+	[OP_ADD]    = "add",
+	[OP_ADC]    = "adc",
+	[OP_SUB]    = "sub",
+	[OP_CMP]    = "cmp",
+	[OP_JZ]     = "jz",
+	[OP_JL]     = "jl",
+	[OP_JLE]    = "jle",
+	[OP_JB]     = "jb",
+	[OP_JBE]    = "jbe",
+	[OP_JP]     = "jp",
+	[OP_JO]     = "jo",
+	[OP_JS]     = "js",
+	[OP_JNE]    = "jne",
+	[OP_JGE]    = "jge",
+	[OP_JG]     = "jg",
+	[OP_JNB]    = "jnb",
+	[OP_JA]     = "ja",
+	[OP_JNP]    = "jnp",
+	[OP_JNO]    = "jno",
+	[OP_JNS]    = "jns",
+	[OP_LOOP]   = "loop",
+	[OP_LOOPZ]  = "loopz",
+	[OP_LOOPNZ] = "loopnz",
+	[OP_JCXZ]   = "jcxz",
 };
 
 char *reg_name(uint8_t wide, uint8_t reg) {
@@ -137,6 +161,8 @@ Instruction decode_instruction(void) {
 				uint16_t data = stream[byte_index++];
 				if (field_values[FIELD_WIDE] && !field_values[FIELD_SIGN_EXTEND]) {
 					data |= stream[byte_index++] << 8;
+				} else if (field_values[FIELD_SIGN_EXTEND]) {
+					data = (int16_t)(int8_t)data;
 				}
 				field_values[FIELD_DATA] = data;
 
@@ -149,8 +175,10 @@ Instruction decode_instruction(void) {
 				uint8_t data;
 				if (field.num_bits > 0) {
 					data = stream[byte_index] >> (bits_pending - field.num_bits);
-					uint8_t mask = ~((int8_t)0x80 >> (7 - field.num_bits));
-					data &= mask;
+					if (field.num_bits < 8) {
+						uint8_t mask = ~((int8_t)0x80 >> (7 - field.num_bits));
+						data &= mask;
+					}
 					bits_pending -= field.num_bits;
 				} else {
 					data = field.value;
@@ -169,6 +197,11 @@ Instruction decode_instruction(void) {
 
 		if (!instruction_match) continue;
 
+		if (bits_pending == 0) 
+			++byte_index;
+
+		int instruction_size = byte_index;
+
 		inst.wide = field_values[FIELD_WIDE];
 		uint8_t mode = field_values[FIELD_MODE];
 		bool reg_mode = field_values[FIELD_MODE] == 0x3;
@@ -176,8 +209,6 @@ Instruction decode_instruction(void) {
 		uint8_t r_m = field_values[FIELD_REG_MEM];
 		uint16_t disp = field_values[FIELD_DISP];
 		uint16_t imm = field_values[FIELD_DATA];
-		
-		// TODO(shaw): set immediate values in operands
 
 		if (reg_mode) {
 			inst.operands[dir ? 0 : 1] = (Operand) { .kind = OPERAND_REG, .reg = field_values[FIELD_REG] };
@@ -199,12 +230,15 @@ Instruction decode_instruction(void) {
 			inst.operands[dir ? 1 : 0] = (Operand) { .kind = OPERAND_MEM, .addr = addr };
 		}
 
-		if (field_values[FIELD_SRC_IS_IMM])
-			inst.operands[1] = (Operand){ .kind = OPERAND_IMM, .imm = imm };
+		if (field_values[FIELD_SRC_IMM]) {
+			if (field_values[FIELD_REL_JMP])
+				inst.operands[1] = (Operand) { .kind = OPERAND_REL_IMM, .imm = imm + instruction_size };
+			else 
+				inst.operands[1] = (Operand) { .kind = OPERAND_IMM, .imm = imm };
+		}
 
-		if (bits_pending == 0) 
-			++byte_index;
-		stream += byte_index;
+		
+		stream += instruction_size;
 
 		return inst;
 	}
@@ -222,6 +256,9 @@ char *operand_to_string(Arena *arena, Operand *operand, bool wide) {
 	switch (operand->kind) {
 	case OPERAND_IMM:
 		buf_printf(&buf_ptr, "%d", operand->imm);
+		break;
+	case OPERAND_REL_IMM:
+		buf_printf(&buf_ptr, "$+%d", (int16_t)operand->imm);
 		break;
 	case OPERAND_MEM: {
 		EffectiveAddress addr = operand->addr;
@@ -253,44 +290,39 @@ char *disassemble_instruction(Arena *arena, Instruction *inst) {
 		case OP_ADD: case OP_ADC:
 		case OP_SUB: case OP_SBB:
 		case OP_CMP:
+		case OP_JZ: case OP_JL: case OP_JLE: case OP_JB: case OP_JBE: case OP_JP: 
+        case OP_JO: case OP_JS: case OP_JNE: case OP_JGE: case OP_JG: case OP_JNB: 
+        case OP_JA: case OP_JNP: case OP_JNO: case OP_JNS: case OP_LOOP: case OP_LOOPZ: 
+		case OP_LOOPNZ: case OP_JCXZ:
 			break;
 		default: 
 			assert(0);
 			break;
 	}
+	Operand *operand_dst = &inst->operands[0];
+	Operand *operand_src = &inst->operands[1];
 
 	char *asm_inst = arena_alloc_zeroed(arena, SINGLE_INST_BUF_SIZE);
 	char *buf_ptr = asm_inst;
 
-	char *dst = operand_to_string(arena, &inst->operands[0], inst->wide);
-	char *src = operand_to_string(arena, &inst->operands[1], inst->wide);
+	char *dst = "";
+	char *sep = "";
+	if (!(operand_dst->kind == OPERAND_REG && operand_dst->reg == REG_IP)) {
+		dst = operand_to_string(arena, operand_dst, inst->wide);
+		sep = ", ";
+	}
+
+	char *src = operand_to_string(arena, operand_src, inst->wide);
 
 	char *size = "";
-	if (inst->operands[1].kind == OPERAND_IMM && inst->operands[0].kind == OPERAND_MEM) {
+	if (operand_src->kind == OPERAND_IMM && operand_dst->kind == OPERAND_MEM) {
 		size = inst->wide ? "word" : "byte";
 	}
 
-	buf_printf(&buf_ptr, "%s %s%s, %s", mnemonics[inst->op], size, dst, src);
+	buf_printf(&buf_ptr, "%s %s%s%s%s", mnemonics[inst->op], size, dst, sep, src);
 		
-
 	return asm_inst;
 }
-	
-/*
-char *disassemble_conditional_jump(Arena *arena, Instruction *inst) {
-	// FIXME: have to recompute the full opcode since we are only storing 6 bits of opcode directly
-	// should probably store 8 bit opcode all the time, but there are a lot of places where the 6 
-	// bit version is used with bitmasks and will need to go change all of those. im lazy rn
-	uint8_t full_opcode = ((uint8_t)inst->opcode << 2) | inst->dir << 1 | inst->wide;
-	int8_t displacement = (int8_t)inst->disp;
-	
-	// longest conditional jump is 6 chars + space + largest 8bit signed is 4 chars
-	int len = 16; 
-	char *asm_inst = arena_alloc_zeroed(arena, len);
-	snprintf(asm_inst, len, "%s %d", conditional_jump_names[full_opcode], displacement);
-	return asm_inst;
-}
-*/
 
 int main(int argc, char **argv) {
 	if (argc != 2) {

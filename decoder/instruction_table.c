@@ -1,3 +1,8 @@
+// NOTE(shaw): this is currently used for conditional jump instructions, 
+// not sure if this is a good idea yet, just needed some way to specify
+// that conditional jumps will affect the ip reg
+#define REG_IP 69
+
 typedef enum {
 	OP_NONE,
 	OP_MOV,
@@ -11,6 +16,27 @@ typedef enum {
 	OP_DEC,
 	OP_NEG,
 	OP_CMP,
+	OP_JZ,
+	OP_JL,
+	OP_JLE,
+	OP_JB, 
+	OP_JBE,
+	OP_JP, 
+	OP_JO, 
+	OP_JS, 
+	OP_JNE,
+	OP_JGE,
+	OP_JG, 
+	OP_JNB,
+	OP_JA, 
+	OP_JNP,
+	OP_JNO,
+	OP_JNS,
+	OP_LOOP,
+	OP_LOOPZ,
+	OP_LOOPNZ,
+	OP_JCXZ,
+	OP_COUNT,
 } Operation;
 
 typedef enum {
@@ -25,7 +51,8 @@ typedef enum {
 	FIELD_SEG_REG,
 	FIELD_DISP,
 	FIELD_DATA,
-	FIELD_SRC_IS_IMM,
+	FIELD_SRC_IMM,
+	FIELD_REL_JMP,
 	FIELD_COUNT,
 } FieldKind;
 
@@ -37,7 +64,7 @@ typedef struct {
 
 typedef struct {
 	Operation op;
-    Field fields[12];
+    Field fields[16];
 } InstructionEncoding;
 
 #define CODE(num_bits, val) { FIELD_OPCODE, (num_bits), (val) }
@@ -50,14 +77,17 @@ typedef struct {
 #define SR { FIELD_SEG_REG, 2 }
 #define DISP { FIELD_DISP, 16 }
 #define DATA { FIELD_DATA, 16 }
-#define SRC_IMM { FIELD_SRC_IS_IMM, 0, 1 }
+#define SRC_IMM { FIELD_SRC_IMM, 0, 1 }
+#define REL_JMP { FIELD_REL_JMP, 0, 1 }
 #define SET_D(val) { FIELD_DIR, 0, (val) }
+#define SET_S(val) { FIELD_SIGN_EXTEND, 0, (val) }
 #define SET_MOD(val) { FIELD_MODE, 0, (val) }
 #define SET_REG(val) { FIELD_REG, 0, (val) }
+#define IP_INC8 SET_S(1), DATA, SET_D(1), SET_REG(REG_IP), SET_MOD(3), SRC_IMM, REL_JMP
 
-// NOTE(shaw): in the decoder, FIELD_DISP depends on FIELD_MODE being set before it
-// and FIELD_DATA depends on FIELD_WIDE being set before it (and in one edge case 
-// FIELD_SIGN_EXTEND, but usually this is zero so it doesn't matter in the general case)
+// NOTE(shaw): in the decoder:
+//     FIELD_DISP depends on FIELD_MODE being set before it
+//     FIELD_DATA depends on FIELD_WIDE and FIELD_SIGN_EXTEND being set before it 
 
 InstructionEncoding instruction_table[] = {
 
@@ -168,7 +198,6 @@ InstructionEncoding instruction_table[] = {
 //------------------------------------------------------------------------------
     { OP_NEG, { CODE(7, 0x7B), W, MOD, CODE(3, 0x3), RM, DISP, SET_D(0) }},
  
-
 //------------------------------------------------------------------------------
 //                     CMP
 //------------------------------------------------------------------------------
@@ -182,7 +211,29 @@ InstructionEncoding instruction_table[] = {
 	{ OP_CMP, { CODE(7, 0x1E), W, DATA, SET_REG(0), SET_D(1), SRC_IMM }},
 
 
-
+//------------------------------------------------------------------------------
+//                     Conditional Jumps
+//------------------------------------------------------------------------------
+	{ OP_JZ,     { CODE(8, 0x74), IP_INC8 }},
+	{ OP_JL,     { CODE(8, 0x7C), IP_INC8 }},
+	{ OP_JLE,    { CODE(8, 0x7E), IP_INC8 }},
+	{ OP_JB,     { CODE(8, 0x72), IP_INC8 }},
+	{ OP_JBE,    { CODE(8, 0x76), IP_INC8 }},
+	{ OP_JP,     { CODE(8, 0x7A), IP_INC8 }},
+	{ OP_JO,     { CODE(8, 0x70), IP_INC8 }},
+	{ OP_JS,     { CODE(8, 0x78), IP_INC8 }},
+	{ OP_JNE,    { CODE(8, 0x75), IP_INC8 }},
+	{ OP_JGE,    { CODE(8, 0x7D), IP_INC8 }},
+	{ OP_JG,     { CODE(8, 0x7F), IP_INC8 }},
+	{ OP_JNB,    { CODE(8, 0x73), IP_INC8 }},
+	{ OP_JA,     { CODE(8, 0x77), IP_INC8 }},
+	{ OP_JNP,    { CODE(8, 0x7B), IP_INC8 }},
+	{ OP_JNO,    { CODE(8, 0x71), IP_INC8 }},
+	{ OP_JNS,    { CODE(8, 0x79), IP_INC8 }},
+	{ OP_LOOP,   { CODE(8, 0xE2), IP_INC8 }},
+	{ OP_LOOPZ,  { CODE(8, 0xE1), IP_INC8 }},
+	{ OP_LOOPNZ, { CODE(8, 0xE0), IP_INC8 }},
+	{ OP_JCXZ,   { CODE(8, 0xE3), IP_INC8 }},
 
 };
 
@@ -197,14 +248,9 @@ InstructionEncoding instruction_table[] = {
 #undef DISP
 #undef DATA
 #undef SRC_IMM
+#undef REL_JMP
 #undef SET_D
+#undef SET_S
 #undef SET_MOD
 #undef SET_REG
-
-
-
-
-
-
-
-
+#undef IP_INC8
