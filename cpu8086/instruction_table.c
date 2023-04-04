@@ -1,72 +1,3 @@
-// NOTE(shaw): this is currently used for conditional jump instructions, 
-// not sure if this is a good idea yet, just needed some way to specify
-// that conditional jumps will affect the ip reg
-#define REG_IP 69
-
-typedef enum {
-	OP_NONE,
-	OP_MOV,
-	OP_ADD,
-	OP_ADC,
-	OP_INC,
-	OP_AAA,
-	OP_DAA,
-	OP_SUB,
-	OP_SBB,
-	OP_DEC,
-	OP_NEG,
-	OP_CMP,
-	OP_JZ,
-	OP_JL,
-	OP_JLE,
-	OP_JB, 
-	OP_JBE,
-	OP_JP, 
-	OP_JO, 
-	OP_JS, 
-	OP_JNE,
-	OP_JGE,
-	OP_JG, 
-	OP_JNB,
-	OP_JA, 
-	OP_JNP,
-	OP_JNO,
-	OP_JNS,
-	OP_LOOP,
-	OP_LOOPZ,
-	OP_LOOPNZ,
-	OP_JCXZ,
-	OP_COUNT,
-} Operation;
-
-typedef enum {
-	FIELD_NONE,
-	FIELD_OPCODE,
-	FIELD_DIR,
-	FIELD_SIGN_EXTEND,
-	FIELD_WIDE,
-	FIELD_MODE,
-	FIELD_REG,
-	FIELD_REG_MEM,
-	FIELD_SEG_REG,
-	FIELD_DISP,
-	FIELD_DATA,
-	FIELD_SRC_IMM,
-	FIELD_REL_JMP,
-	FIELD_COUNT,
-} FieldKind;
-
-typedef struct {
-    FieldKind kind;
-    int num_bits;
-    uint8_t value;
-} Field;
-
-typedef struct {
-	Operation op;
-    Field fields[16];
-} InstructionEncoding;
-
 #define CODE(num_bits, val) { FIELD_OPCODE, (num_bits), (val) }
 #define D { FIELD_DIR, 1 }
 #define S { FIELD_SIGN_EXTEND, 1 }
@@ -214,26 +145,26 @@ InstructionEncoding instruction_table[] = {
 //------------------------------------------------------------------------------
 //                     Conditional Jumps
 //------------------------------------------------------------------------------
-	{ OP_JZ,     { CODE(8, 0x74), IP_INC8 }},
-	{ OP_JL,     { CODE(8, 0x7C), IP_INC8 }},
-	{ OP_JLE,    { CODE(8, 0x7E), IP_INC8 }},
-	{ OP_JB,     { CODE(8, 0x72), IP_INC8 }},
-	{ OP_JBE,    { CODE(8, 0x76), IP_INC8 }},
-	{ OP_JP,     { CODE(8, 0x7A), IP_INC8 }},
-	{ OP_JO,     { CODE(8, 0x70), IP_INC8 }},
-	{ OP_JS,     { CODE(8, 0x78), IP_INC8 }},
-	{ OP_JNE,    { CODE(8, 0x75), IP_INC8 }},
-	{ OP_JGE,    { CODE(8, 0x7D), IP_INC8 }},
-	{ OP_JG,     { CODE(8, 0x7F), IP_INC8 }},
-	{ OP_JNB,    { CODE(8, 0x73), IP_INC8 }},
-	{ OP_JA,     { CODE(8, 0x77), IP_INC8 }},
-	{ OP_JNP,    { CODE(8, 0x7B), IP_INC8 }},
-	{ OP_JNO,    { CODE(8, 0x71), IP_INC8 }},
-	{ OP_JNS,    { CODE(8, 0x79), IP_INC8 }},
-	{ OP_LOOP,   { CODE(8, 0xE2), IP_INC8 }},
-	{ OP_LOOPZ,  { CODE(8, 0xE1), IP_INC8 }},
-	{ OP_LOOPNZ, { CODE(8, 0xE0), IP_INC8 }},
-	{ OP_JCXZ,   { CODE(8, 0xE3), IP_INC8 }},
+	{ OP_JZ,     { CODE(8, 0x74), IP_INC8 }}, // jump on equal/zero
+	{ OP_JL,     { CODE(8, 0x7C), IP_INC8 }}, // jump on less/not greater or equal
+	{ OP_JLE,    { CODE(8, 0x7E), IP_INC8 }}, // jump on less or equal/not greater
+	{ OP_JB,     { CODE(8, 0x72), IP_INC8 }}, // jump on below/not above or equal
+	{ OP_JBE,    { CODE(8, 0x76), IP_INC8 }}, // jump on below or equal/not above
+	{ OP_JP,     { CODE(8, 0x7A), IP_INC8 }}, // jump on parity/parity even
+	{ OP_JO,     { CODE(8, 0x70), IP_INC8 }}, // jump on overflow
+	{ OP_JS,     { CODE(8, 0x78), IP_INC8 }}, // jump on sign
+	{ OP_JNE,    { CODE(8, 0x75), IP_INC8 }}, // jump on not equal/not zero
+	{ OP_JGE,    { CODE(8, 0x7D), IP_INC8 }}, // jump on greater or equal/not less
+	{ OP_JG,     { CODE(8, 0x7F), IP_INC8 }}, // jump on greater/not less or equal
+	{ OP_JNB,    { CODE(8, 0x73), IP_INC8 }}, // jump on not below/above or equal
+	{ OP_JA,     { CODE(8, 0x77), IP_INC8 }}, // jump on above/not below of equal
+	{ OP_JNP,    { CODE(8, 0x7B), IP_INC8 }}, // jump on parity odd/not parity
+	{ OP_JNO,    { CODE(8, 0x71), IP_INC8 }}, // jump on not overflow
+	{ OP_JNS,    { CODE(8, 0x79), IP_INC8 }}, // jump on not sign
+	{ OP_LOOP,   { CODE(8, 0xE2), IP_INC8 }}, // loop cx times
+	{ OP_LOOPZ,  { CODE(8, 0xE1), IP_INC8 }}, // loop while zero/equal
+	{ OP_LOOPNZ, { CODE(8, 0xE0), IP_INC8 }}, // loop while not zero/equal
+	{ OP_JCXZ,   { CODE(8, 0xE3), IP_INC8 }}, // jump on cx zero
 
 };
 

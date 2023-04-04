@@ -1,62 +1,9 @@
 #include "../common.c"
+#include "cpu8086.h"
 #include "instruction_table.c"
 
-#define DISASSEM_BUF_SIZE       4096
-#define SINGLE_INST_BUF_SIZE    64
-#define OPERAND_BUF_SIZE        32
-
-typedef uint8_t RegIndex;
-
-typedef enum {
-	OPERAND_NONE,
-	OPERAND_IMM,
-	OPERAND_REL_IMM,
-	OPERAND_REG,
-	OPERAND_MEM,
-} OperandKind;
-
-typedef struct {
-	RegIndex reg_base;
-	RegIndex reg_offset;
-	uint16_t imm_offset;
-	bool is_direct;
-	bool has_reg_offset;
-} EffectiveAddress;
-
-typedef struct {
-	OperandKind kind;
-	union {
-		uint16_t imm;
-		RegIndex reg;
-		EffectiveAddress addr;
-	};
-} Operand;
-
-typedef struct {
-	Operation op;
-	Operand operands[2];
-	bool wide;
-} Instruction;
-
-uint8_t *stream;
-
-uint8_t effective_address_reg_table[2][8] = {
-	{ 0x3, 0x3, 0x5, 0x5, 0x6, 0x7, 0x5, 0x3 }, // base reg
-	{ 0x6, 0x7, 0x6, 0x7, 0x0, 0x0, 0x0, 0x0 }, // offset reg
-};
-
-// NOTE(shaw): maybe collapse this into 1 dimension and use an enum to index it, 
-// so we don't use magic register numbers as indices, but then we lose the ability to 
-// use the direct register encoding to index into this table (table 4.9 from 8086 manual)
-char *regs[2][8] = {
-	{ "al", "cl", "dl", "bl", "ah", "ch", "dh", "bh" },
-	{ "ax", "cx", "dx", "bx", "sp", "bp", "si", "di" },
-};
-
-char *effective_address_table[8] = {
-	"bx + si", "bx + di", "bp + si", "bp + di",
-	"si", "di", "bp", "bx",
-};
+uint8_t memory[1 * MB];
+uint16_t regs[REG_COUNT];
 
 char *mnemonics[] = {
 	[OP_MOV]    = "mov",
@@ -86,12 +33,46 @@ char *mnemonics[] = {
 	[OP_JCXZ]   = "jcxz",
 };
 
-char *reg_name(uint8_t wide, uint8_t reg) {
-	return regs[wide][reg];
+char *reg_name(Register reg) {
+	// NOTE(shaw): maybe memory allocation with string interning would be a good fit??
+	// rather than all these tables??
+
+	static char *half_reg_names[2][4] = {
+		{ "al", "bl", "cl", "dl" },
+		{ "ah", "bh", "ch", "dh" }
+	};
+
+	static char *reg_names[9] = {
+		[REG_A]  = "ax",
+		[REG_B]  = "bx",
+		[REG_C]  = "cx",
+		[REG_D]  = "dx",
+		[REG_SI] = "si",
+		[REG_DI] = "di",
+		[REG_SP] = "sp",
+		[REG_BP] = "bp",
+		[REG_IP] = "ip",
+	};
+
+	if (reg.size == 1) {
+		assert(reg.index < 4);
+		return half_reg_names[reg.offset][reg.index];
+	} else {
+		assert(reg.size == 2);
+		return reg_names[reg.index];
+	}
 }
 
-bool is_reg_mode(uint8_t mode) {
-	return mode == 0x3;
+uint32_t absolute_address(EffectiveAddress *eff_addr) {
+	if (eff_addr->is_direct)
+		return eff_addr->imm_offset;
+
+	uint32_t offset = regs[eff_addr->reg_base.index];
+	if (eff_addr->has_reg_offset) 
+		offset += regs[eff_addr->reg_offset.index];
+	offset += eff_addr->imm_offset;
+	assert(offset <= 1*MB);
+	return offset;
 }
 
 // NOTE(shaw): this isn't great, it doesn't check if there is space in the buffer
@@ -118,9 +99,45 @@ void buf_printf(char **buf, char *fmt, ...) {
 	*buf += count;
 }
 
+Register reg_from_encoding(uint8_t encoding, bool wide) {
+	static Register reg_encoding_table[9][2] = {
+		{ { REG_A,  1, 0 }, { REG_A,  2, 0 } },
+		{ { REG_C,  1, 0 }, { REG_C,  2, 0 } },
+		{ { REG_D,  1, 0 }, { REG_D,  2, 0 } },
+		{ { REG_B,  1, 0 }, { REG_B,  2, 0 } },
+		{ { REG_A,  1, 1 }, { REG_SP, 2, 0 } },
+		{ { REG_C,  1, 1 }, { REG_BP, 2, 0 } },
+		{ { REG_D,  1, 1 }, { REG_SI, 2, 0 } },
+		{ { REG_B,  1, 1 }, { REG_DI, 2, 0 } },
+		{ { REG_IP, 2, 0 }, { REG_IP, 2, 0 } }
+	};
+	return reg_encoding_table[encoding][wide];
+}
+
+EffectiveAddress effective_address_from_encoding(uint8_t mode, uint8_t r_m, uint16_t disp) {
+	static Register reg_encoding_table[8] = {
+		{ REG_B,  2, 0 }, { REG_B,  2, 0 }, { REG_BP, 2, 0 }, { REG_BP, 2, 0 },
+		{ REG_SI, 2, 0 }, { REG_DI, 2, 0 }, { REG_BP, 2, 0 }, { REG_B,  2, 0 }
+	};
+
+	EffectiveAddress addr = {0};
+	addr.is_direct = mode == 0x0 && r_m == 0x6;
+	addr.imm_offset = disp;
+	if (!addr.is_direct) {
+		addr.reg_base = reg_encoding_table[r_m];
+		if (r_m < 4) {
+			addr.reg_offset = (r_m % 2) == 0 ? (Register){REG_SI, 2, 0} : (Register){REG_DI, 2, 0};
+			addr.has_reg_offset = true;
+		}
+	}
+	return addr;
+}
+
 int instruction_count = 0; // JUST USED FOR DEBUGGING
 Instruction decode_instruction(void) {
 	++instruction_count;
+
+	uint8_t *stream = &memory[regs[REG_IP]];
 
 	Instruction inst = { 0 };
 	uint16_t field_values[FIELD_COUNT];
@@ -200,31 +217,24 @@ Instruction decode_instruction(void) {
 
 		int instruction_size = byte_index;
 
-		inst.wide = field_values[FIELD_WIDE];
-		uint8_t mode = field_values[FIELD_MODE];
-		bool reg_mode = field_values[FIELD_MODE] == 0x3;
-		bool dir = field_values[FIELD_DIR];
-		uint8_t r_m = field_values[FIELD_REG_MEM];
-		uint16_t disp = field_values[FIELD_DISP];
-		uint16_t imm = field_values[FIELD_DATA];
+		inst.wide      = field_values[FIELD_WIDE];
+		uint8_t reg    = field_values[FIELD_REG];
+		uint8_t mode   = field_values[FIELD_MODE];
+		bool reg_mode  = field_values[FIELD_MODE] == 0x3;
+		bool dir       = field_values[FIELD_DIR];
+		uint8_t r_m    = field_values[FIELD_REG_MEM];
+		uint16_t disp  = field_values[FIELD_DISP];
+		uint16_t imm   = field_values[FIELD_DATA];
 
 		if (reg_mode) {
-			inst.operands[dir ? 0 : 1] = (Operand) { .kind = OPERAND_REG, .reg = field_values[FIELD_REG] };
-			inst.operands[dir ? 1 : 0] = (Operand) { .kind = OPERAND_REG, .reg = r_m };
-	
+			inst.operands[dir ? 0 : 1] = (Operand) { .kind = OPERAND_REG, .reg = reg_from_encoding(reg, inst.wide) };
+			inst.operands[dir ? 1 : 0] = (Operand) { .kind = OPERAND_REG, .reg = reg_from_encoding(r_m, inst.wide) };
+
 		} else {
 			// build register operand
-			inst.operands[dir ? 0 : 1] = (Operand) { .kind = OPERAND_REG, .reg = field_values[FIELD_REG] };
-
+			inst.operands[dir ? 0 : 1] = (Operand) { .kind = OPERAND_REG, .reg = reg_from_encoding(reg, inst.wide) };
 			// build memory operand
-			EffectiveAddress addr;
-			addr.is_direct = mode == 0x0 && r_m == 0x6;
-			addr.imm_offset = disp;
-			if (!addr.is_direct) {
-				addr.reg_base = effective_address_reg_table[0][r_m];
-				addr.reg_offset = effective_address_reg_table[1][r_m];
-				addr.has_reg_offset = r_m < 4;
-			}
+			EffectiveAddress addr = effective_address_from_encoding(mode, r_m, disp);
 			inst.operands[dir ? 1 : 0] = (Operand) { .kind = OPERAND_MEM, .addr = addr };
 		}
 
@@ -235,8 +245,7 @@ Instruction decode_instruction(void) {
 				inst.operands[1] = (Operand) { .kind = OPERAND_IMM, .imm = imm };
 		}
 
-		
-		stream += instruction_size;
+		regs[REG_IP] += instruction_size;
 
 		return inst;
 	}
@@ -244,9 +253,37 @@ Instruction decode_instruction(void) {
 	return inst;
 }
 
+void execute_instruction(Instruction *inst) {
+	assert(inst->op == OP_MOV);
+	assert(inst->wide);
+	Operand *operand_dst = &inst->operands[0];
+	Operand *operand_src = &inst->operands[1];
+
+	uint16_t *dst;
+	if (operand_dst->kind == OPERAND_REG) {
+		dst = &regs[operand_dst->reg.index];
+	} else {
+		assert(operand_dst->kind == OPERAND_MEM);
+		dst = (uint16_t*) &memory[absolute_address(&operand_dst->addr)];
+	}
+
+	uint16_t src;
+	if (operand_src->kind == OPERAND_REG) {
+		src = regs[operand_src->reg.index];
+	} else if (operand_src->kind == OPERAND_MEM) {
+		src = memory[absolute_address(&operand_src->addr)];
+	} else {
+		assert(operand_src->kind == OPERAND_IMM);
+		src = operand_src->imm;
+	}
+
+	*dst = src;
+}
+
+
 char *operand_to_string(Arena *arena, Operand *operand, bool wide) {
 	if (operand->kind == OPERAND_REG)
-		return reg_name(wide, operand->reg);
+		return reg_name(operand->reg);
 	
 	char *str = arena_alloc_zeroed(arena, OPERAND_BUF_SIZE);
 	char *buf_ptr = str;
@@ -263,9 +300,9 @@ char *operand_to_string(Arena *arena, Operand *operand, bool wide) {
 		if (addr.is_direct) {
 			buf_printf(&buf_ptr, "[%d]", addr.imm_offset);
 		} else {
-			buf_printf(&buf_ptr, "[%s", reg_name(1, addr.reg_base));
+			buf_printf(&buf_ptr, "[%s", reg_name(addr.reg_base));
 			if (addr.has_reg_offset)
-				buf_printf(&buf_ptr, " + %s", reg_name(1, addr.reg_offset));
+				buf_printf(&buf_ptr, " + %s", reg_name(addr.reg_offset));
 			if (addr.imm_offset)
 				buf_printf(&buf_ptr, " + %d", addr.imm_offset);
 			buf_printf(&buf_ptr, "]");
@@ -305,7 +342,7 @@ char *disassemble_instruction(Arena *arena, Instruction *inst) {
 
 	char *dst = "";
 	char *sep = "";
-	if (!(operand_dst->kind == OPERAND_REG && operand_dst->reg == REG_IP)) {
+	if (!(operand_dst->kind == OPERAND_REG && operand_dst->reg.index == REG_IP)) {
 		dst = operand_to_string(arena, operand_dst, inst->wide);
 		sep = ", ";
 	}
@@ -334,6 +371,7 @@ int main(int argc, char **argv) {
 		exit(1);
 	}
 
+	// TODO(shaw): read file directly into memory buffer to avoid the copy
 	char *file_data;
 	size_t file_size;
 	int rc = read_entire_file(fp, &file_data, &file_size);
@@ -341,6 +379,8 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "Failed to read file %s\n", argv[1]);
 		exit(1);
 	}
+	assert(file_size <= 1*MB);
+	memcpy(memory, file_data, file_size);
 
 	Arena string_arena = {0};
 	char buf[DISASSEM_BUF_SIZE];
@@ -348,10 +388,9 @@ int main(int argc, char **argv) {
 
 	buf_printf(&buf_ptr, "bits 16\n");
 
-	stream = (uint8_t*)file_data;
-
-	while (stream < file_data + file_size) {
+	while (regs[REG_IP] < file_size) {
 		Instruction inst = decode_instruction();
+		//execute_instruction(&inst);
 		char *asm_inst = disassemble_instruction(&string_arena, &inst);
 		buf_printf(&buf_ptr, "%s\n", asm_inst);
 	}
