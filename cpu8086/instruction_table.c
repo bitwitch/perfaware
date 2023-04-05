@@ -11,10 +11,12 @@
 #define SRC_IMM { FIELD_SRC_IMM, 0, 1 }
 #define REL_JMP { FIELD_REL_JMP, 0, 1 }
 #define SET_D(val) { FIELD_DIR, 0, (val) }
+#define SET_W(val) { FIELD_WIDE, 0, (val) }
 #define SET_S(val) { FIELD_SIGN_EXTEND, 0, (val) }
 #define SET_MOD(val) { FIELD_MODE, 0, (val) }
 #define SET_REG(val) { FIELD_REG, 0, (val) }
 #define IP_INC8 SET_S(1), DATA, SET_D(1), SET_REG(REG_IP), SET_MOD(3), SRC_IMM, REL_JMP
+#define HAS_SR SET_W(1), { FIELD_HAS_SEG_REG, 0, 1 }
 
 // NOTE(shaw): in the decoder:
 //     FIELD_DISP depends on FIELD_MODE being set before it
@@ -41,10 +43,10 @@ InstructionEncoding instruction_table[] = {
 	{ OP_MOV, { CODE(4, 0x51), W, SET_MOD(0), DISP, SET_REG(0), SET_D(0) }},
 
     // register/memory to segment register
-	{ OP_MOV, { CODE(8, 0x8E), MOD, CODE(1, 0), SR, RM, DISP, SET_D(1) }},
+	{ OP_MOV, { CODE(8, 0x8E), MOD, CODE(1, 0), SR, RM, DISP, SET_D(1), HAS_SR }},
 
-    // segment registe to register/memory
-	{ OP_MOV, { CODE(8, 0x8E), MOD, CODE(1, 0), SR, RM, DISP, SET_D(0) }},
+    // segment register to register/memory
+	{ OP_MOV, { CODE(8, 0x8C), MOD, CODE(1, 0), SR, RM, DISP, SET_D(0), HAS_SR }},
 
 //------------------------------------------------------------------------------
 //                     ADD
@@ -181,7 +183,9 @@ InstructionEncoding instruction_table[] = {
 #undef SRC_IMM
 #undef REL_JMP
 #undef SET_D
+#undef SET_W
 #undef SET_S
 #undef SET_MOD
 #undef SET_REG
 #undef IP_INC8
+#undef HAS_SR

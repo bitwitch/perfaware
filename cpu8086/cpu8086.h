@@ -8,10 +8,14 @@ typedef enum {
 	REG_B,
 	REG_C,
 	REG_D,
-	REG_SI,
-	REG_DI,
 	REG_SP,
 	REG_BP,
+	REG_SI,
+	REG_DI,
+	REG_ES,
+	REG_CS,
+	REG_SS,
+	REG_DS,
 	REG_IP,
 	REG_COUNT,
 } RegIndex;
@@ -103,6 +107,7 @@ typedef enum {
 	FIELD_DATA,
 	FIELD_SRC_IMM,
 	FIELD_REL_JMP,
+	FIELD_HAS_SEG_REG,
 	FIELD_COUNT,
 } FieldKind;
 
