@@ -3,20 +3,22 @@
 #define OPERAND_BUF_SIZE        32
 #define MB                      1024*1024
 
+// NOTE(shaw): order is important for most of these regs, as they are used as indices
 typedef enum {
-	REG_A,
-	REG_B,
-	REG_C,
-	REG_D,
-	REG_SP,
-	REG_BP,
-	REG_SI,
-	REG_DI,
+	REG_A  = 0,
+	REG_B  = 1,
+	REG_C  = 2,
+	REG_D  = 3,
+	REG_SP = 4,
+	REG_BP = 5,
+	REG_SI = 6,
+	REG_DI = 7,
+	REG_IP = 8,
 	REG_ES,
 	REG_CS,
 	REG_SS,
 	REG_DS,
-	REG_IP,
+	REG_FLAGS,
 	REG_COUNT,
 } RegIndex;
 
@@ -72,7 +74,7 @@ typedef enum {
 	OP_JP, 
 	OP_JO, 
 	OP_JS, 
-	OP_JNE,
+	OP_JNZ,
 	OP_JGE,
 	OP_JG, 
 	OP_JNB,
@@ -83,8 +85,7 @@ typedef enum {
 	OP_LOOP,
 	OP_LOOPZ,
 	OP_LOOPNZ,
-	OP_JCXZ,
-	OP_COUNT,
+	OP_JCXZ
 } Operation;
 
 typedef struct {
@@ -121,3 +122,16 @@ typedef struct {
 	Operation op;
 	Field fields[16];
 } InstructionEncoding;
+
+// these are masks for the corresponding bit in the flags register
+typedef enum {
+	FLAG_CARRY     = 0x0001,
+	FLAG_PARITY    = 0x0004,
+	FLAG_AUX_CARRY = 0x0008,
+	FLAG_ZERO      = 0x0040,
+	FLAG_SIGN      = 0x0080,
+	FLAG_TRAP      = 0x0100,
+	FLAG_INTERUPT  = 0x0200,
+	FLAG_DIR       = 0x0400,
+	FLAG_OVERFLOW  = 0x0800
+} Flag;

@@ -15,7 +15,7 @@
 #define SET_S(val) { FIELD_SIGN_EXTEND, 0, (val) }
 #define SET_MOD(val) { FIELD_MODE, 0, (val) }
 #define SET_REG(val) { FIELD_REG, 0, (val) }
-#define IP_INC8 SET_S(1), DATA, SET_D(1), SET_REG(REG_IP), SET_MOD(3), SRC_IMM, REL_JMP
+#define IP_INC8 SET_S(1), DATA, SET_D(1), SET_REG(REG_IP), SET_MOD(3), SET_W(1), SRC_IMM, REL_JMP
 #define HAS_SR SET_W(1), { FIELD_HAS_SEG_REG, 0, 1 }
 
 // NOTE(shaw): in the decoder:
@@ -155,7 +155,7 @@ InstructionEncoding instruction_table[] = {
 	{ OP_JP,     { CODE(8, 0x7A), IP_INC8 }}, // jump on parity/parity even
 	{ OP_JO,     { CODE(8, 0x70), IP_INC8 }}, // jump on overflow
 	{ OP_JS,     { CODE(8, 0x78), IP_INC8 }}, // jump on sign
-	{ OP_JNE,    { CODE(8, 0x75), IP_INC8 }}, // jump on not equal/not zero
+	{ OP_JNZ,    { CODE(8, 0x75), IP_INC8 }}, // jump on not equal/not zero
 	{ OP_JGE,    { CODE(8, 0x7D), IP_INC8 }}, // jump on greater or equal/not less
 	{ OP_JG,     { CODE(8, 0x7F), IP_INC8 }}, // jump on greater/not less or equal
 	{ OP_JNB,    { CODE(8, 0x73), IP_INC8 }}, // jump on not below/above or equal

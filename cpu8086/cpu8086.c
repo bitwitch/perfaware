@@ -19,7 +19,7 @@ char *mnemonics[] = {
 	[OP_JP]     = "jp",
 	[OP_JO]     = "jo",
 	[OP_JS]     = "js",
-	[OP_JNE]    = "jne",
+	[OP_JNZ]    = "jnz",
 	[OP_JGE]    = "jge",
 	[OP_JG]     = "jg",
 	[OP_JNB]    = "jnb",
@@ -39,19 +39,20 @@ char *half_reg_names[2][4] = {
 };
 
 char *reg_names[] = {
-	[REG_A]  = "ax",
-	[REG_B]  = "bx",
-	[REG_C]  = "cx",
-	[REG_D]  = "dx",
-	[REG_SI] = "si",
-	[REG_DI] = "di",
-	[REG_SP] = "sp",
-	[REG_BP] = "bp",
-	[REG_ES] = "es",
-	[REG_CS] = "cs",
-	[REG_SS] = "ss",
-	[REG_DS] = "ds",
-	[REG_IP] = "ip",
+	[REG_A]     = "ax",
+	[REG_B]     = "bx",
+	[REG_C]     = "cx",
+	[REG_D]     = "dx",
+	[REG_SI]    = "si",
+	[REG_DI]    = "di",
+	[REG_SP]    = "sp",
+	[REG_BP]    = "bp",
+	[REG_ES]    = "es",
+	[REG_CS]    = "cs",
+	[REG_SS]    = "ss",
+	[REG_DS]    = "ds",
+	[REG_FLAGS] = "flags",
+	[REG_IP]    = "ip",
 };
 
 char *reg_name(Register reg) {
@@ -79,11 +80,30 @@ uint32_t absolute_address(EffectiveAddress *eff_addr) {
 	return offset;
 }
 
+void set_flag(Flag flag, bool val) {
+	if (val)
+		regs[REG_FLAGS] = regs[REG_FLAGS] | flag;
+	else
+		regs[REG_FLAGS] = regs[REG_FLAGS] & ~flag;
+}
+
+bool get_flag(Flag flag) {
+	return regs[REG_FLAGS] & flag;
+}
+
 void dump_registers(void) {
 	for (int i = 0; i < REG_COUNT; ++i) {
-		printf("%2s: 0x%04X (%5d)\n", reg_names[i], regs[i], regs[i]);
+		if (i == REG_FLAGS) {
+			printf("%-5s:  ", reg_names[i]);
+			if (get_flag(FLAG_ZERO)) printf("Z");
+			if (get_flag(FLAG_SIGN)) printf("S");
+			printf("\n");
+		} else {
+			printf("%-5s:  0x%04X (%d)\n", reg_names[i], regs[i], regs[i]);
+		}
 	}
 }
+
 
 // NOTE(shaw): this isn't great, it doesn't check if there is space in the buffer
 // it just writes. it can def be improved but but it works for now
@@ -262,7 +282,7 @@ Instruction decode_instruction(void) {
 
 		if (field_values[FIELD_SRC_IMM]) {
 			if (field_values[FIELD_REL_JMP])
-				inst.operands[1] = (Operand) { .kind = OPERAND_REL_IMM, .imm = imm + instruction_size };
+				inst.operands[1] = (Operand) { .kind = OPERAND_REL_IMM, .imm = imm };
 			else 
 				inst.operands[1] = (Operand) { .kind = OPERAND_IMM, .imm = imm };
 		}
@@ -279,9 +299,68 @@ Instruction decode_instruction(void) {
 	return inst;
 }
 
-void execute_instruction(Instruction *inst) {
-	assert(inst->op == OP_MOV);
+void execute_op_wide(Operation op, uint16_t *dst, uint16_t val) {
+	switch (op) {
+		case OP_MOV: 
+			*dst = val;
+			break;
+		case OP_ADD: 
+			*dst += val;
+			set_flag(FLAG_ZERO, *dst == 0);
+			set_flag(FLAG_SIGN, (*dst >> 15) & 1);
+			break;
+		case OP_SUB:
+			*dst -= val;
+			set_flag(FLAG_ZERO, *dst == 0);
+			set_flag(FLAG_SIGN, (*dst >> 15) & 1);
+			break;
+		case OP_CMP: {
+			uint16_t result = *dst - val;
+			set_flag(FLAG_ZERO, *dst == 0);
+			set_flag(FLAG_SIGN, (*dst >> 15) & 1);
+			break;
+		}
+		case OP_JNZ: 
+			if (!get_flag(FLAG_ZERO))
+				regs[REG_IP] += (int16_t)val;
+			break;
+		default: 
+			assert(0);
+			break;
+	}
+}
 
+void execute_op(Operation op, uint8_t *dst, uint8_t val) {
+	assert(0);
+	/*
+	switch (op) {
+		case OP_MOV: 
+			*dst = val;
+			break;
+		case OP_ADD: 
+			*dst += val;
+			set_flag(FLAG_ZERO, *dst == 0);
+			set_flag(FLAG_SIGN, (*dst >> 15) & 1);
+			break;
+		case OP_SUB:
+			*dst -= val;
+			set_flag(FLAG_ZERO, *dst == 0);
+			set_flag(FLAG_SIGN, (*dst >> 15) & 1);
+			break;
+		case OP_CMP: {
+			uint8_t result = *dst - val;
+			set_flag(FLAG_ZERO, *dst == 0);
+			set_flag(FLAG_SIGN, (*dst >> 15) & 1);
+			break;
+		}
+		default: 
+			assert(0);
+			break;
+	}
+	*/
+}
+
+void execute_instruction(Instruction *inst) {
 	Operand *operand_dst = &inst->operands[0];
 	Operand *operand_src = &inst->operands[1];
 	
@@ -303,16 +382,15 @@ void execute_instruction(Instruction *inst) {
 		uint32_t addr = absolute_address(&operand_src->addr);
 		src = memory[addr] | (memory[addr + 1] << 8);
 	} else {
-		assert(operand_src->kind == OPERAND_IMM);
+		assert(operand_src->kind == OPERAND_IMM || operand_src->kind == OPERAND_REL_IMM);
 		src = operand_src->imm;
 	}
 
 	if (inst->wide) {
-		*dst = src;
+		execute_op_wide(inst->op, dst, src);
 	} else {
-		uint8_t *dst_byte = (uint8_t*) dst;
-		*dst_byte = src & 0xFF;
-	} 
+		execute_op(inst->op, (uint8_t*)dst, src & 0xFF);
+	}
 }
 
 
@@ -328,7 +406,11 @@ char *operand_to_string(Arena *arena, Operand *operand) {
 		buf_printf(&buf_ptr, "%d", operand->imm);
 		break;
 	case OPERAND_REL_IMM:
-		buf_printf(&buf_ptr, "$+%d", (int16_t)operand->imm);
+		// HACK: this is assumming all OPERAND_REL_IMM are operands to conditional jumps
+		// and the +2 here is just because the nasm assembler uses a syntax where the immediate 
+		// offset is from the start of the instruction, whereas every other fucking thing is 
+		// relative to the end of the instruction
+		buf_printf(&buf_ptr, "$+%d", (int16_t)operand->imm + 2);
 		break;
 	case OPERAND_MEM: {
 		EffectiveAddress addr = operand->addr;
@@ -361,7 +443,7 @@ char *disassemble_instruction(Arena *arena, Instruction *inst) {
 		case OP_SUB: case OP_SBB:
 		case OP_CMP:
 		case OP_JZ: case OP_JL: case OP_JLE: case OP_JB: case OP_JBE: case OP_JP: 
-        case OP_JO: case OP_JS: case OP_JNE: case OP_JGE: case OP_JG: case OP_JNB: 
+        case OP_JO: case OP_JS: case OP_JNZ: case OP_JGE: case OP_JG: case OP_JNB: 
         case OP_JA: case OP_JNP: case OP_JNO: case OP_JNS: case OP_LOOP: case OP_LOOPZ: 
 		case OP_LOOPNZ: case OP_JCXZ:
 			break;
@@ -416,6 +498,7 @@ int main(int argc, char **argv) {
 	}
 	assert(file_size <= 1*MB);
 	memcpy(memory, file_data, file_size);
+	fclose(fp);
 
 	Arena string_arena = {0};
 	char buf[DISASSEM_BUF_SIZE];
@@ -423,17 +506,15 @@ int main(int argc, char **argv) {
 
 	buf_printf(&buf_ptr, "bits 16\n");
 
+	// disassemble 
 	while (regs[REG_IP] < file_size) {
 		Instruction inst = decode_instruction();
-		execute_instruction(&inst);
 		char *asm_inst = disassemble_instruction(&string_arena, &inst);
 		buf_printf(&buf_ptr, "%s\n", asm_inst);
 	}
-	fclose(fp);
+
 	*buf_ptr = 0;
 
-	dump_registers();
-	
 	fp = fopen("test.asm", "w");
 	if (!fp) {
 		perror("fopen");
@@ -446,7 +527,16 @@ int main(int argc, char **argv) {
 		fclose(fp);
 		exit(1);
 	}
-
 	fclose(fp);
+
+	// execute
+	regs[REG_IP] = 0;
+	while (regs[REG_IP] < file_size) {
+		Instruction inst = decode_instruction();
+		execute_instruction(&inst);
+	}
+
+	dump_registers();
+
 	return 0;
 }
