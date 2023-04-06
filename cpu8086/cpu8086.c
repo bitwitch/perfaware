@@ -316,8 +316,8 @@ void execute_op_wide(Operation op, uint16_t *dst, uint16_t val) {
 			break;
 		case OP_CMP: {
 			uint16_t result = *dst - val;
-			set_flag(FLAG_ZERO, *dst == 0);
-			set_flag(FLAG_SIGN, (*dst >> 15) & 1);
+			set_flag(FLAG_ZERO, result == 0);
+			set_flag(FLAG_SIGN, (result >> 15) & 1);
 			break;
 		}
 		case OP_JNZ: 
@@ -330,9 +330,7 @@ void execute_op_wide(Operation op, uint16_t *dst, uint16_t val) {
 	}
 }
 
-void execute_op(Operation op, uint8_t *dst, uint8_t val) {
-	assert(0);
-	/*
+void execute_op_byte(Operation op, uint8_t *dst, uint8_t val) {
 	switch (op) {
 		case OP_MOV: 
 			*dst = val;
@@ -340,24 +338,24 @@ void execute_op(Operation op, uint8_t *dst, uint8_t val) {
 		case OP_ADD: 
 			*dst += val;
 			set_flag(FLAG_ZERO, *dst == 0);
-			set_flag(FLAG_SIGN, (*dst >> 15) & 1);
+			set_flag(FLAG_SIGN, (*dst >> 7) & 1);
 			break;
 		case OP_SUB:
 			*dst -= val;
 			set_flag(FLAG_ZERO, *dst == 0);
-			set_flag(FLAG_SIGN, (*dst >> 15) & 1);
+			set_flag(FLAG_SIGN, (*dst >> 7) & 1);
 			break;
 		case OP_CMP: {
 			uint8_t result = *dst - val;
-			set_flag(FLAG_ZERO, *dst == 0);
-			set_flag(FLAG_SIGN, (*dst >> 15) & 1);
+			set_flag(FLAG_ZERO, result == 0);
+			set_flag(FLAG_SIGN, (result >> 7) & 1);
 			break;
 		}
 		default: 
 			assert(0);
 			break;
 	}
-	*/
+	
 }
 
 void execute_instruction(Instruction *inst) {
@@ -389,7 +387,7 @@ void execute_instruction(Instruction *inst) {
 	if (inst->wide) {
 		execute_op_wide(inst->op, dst, src);
 	} else {
-		execute_op(inst->op, (uint8_t*)dst, src & 0xFF);
+		execute_op_byte(inst->op, (uint8_t*)dst, src & 0xFF);
 	}
 }
 
