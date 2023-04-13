@@ -104,6 +104,22 @@ void dump_registers(void) {
 	}
 }
 
+void dump_memory_to_file(void) {
+	FILE *fp = fopen("memory_dump.data", "wb");
+	if (!fp) {
+		perror("fopen");
+		exit(1);
+	}
+
+	size_t count = 1 * MB;
+	if (fwrite(memory, 1, count, fp) < count) {
+		perror("fwrite");
+		fclose(fp);
+		exit(1);
+	}
+	fclose(fp);
+}
+
 
 // NOTE(shaw): this isn't great, it doesn't check if there is space in the buffer
 // it just writes. it can def be improved but but it works for now
@@ -324,6 +340,11 @@ void execute_op_wide(Operation op, uint16_t *dst, uint16_t val) {
 			if (!get_flag(FLAG_ZERO))
 				regs[REG_IP] += (int16_t)val;
 			break;
+		case OP_LOOP: 
+			if (--regs[REG_C] != 0)
+				regs[REG_IP] += (int16_t)val;
+			break;
+
 		default: 
 			assert(0);
 			break;
@@ -475,12 +496,26 @@ char *disassemble_instruction(Arena *arena, Instruction *inst) {
 }
 
 int main(int argc, char **argv) {
-	if (argc != 2) {
-		printf("Usage: %s <filepath>\n", argv[0]);
+	if (argc < 2) {
+		printf("Usage: %s [--dump-memory] <filepath>\n", argv[0]);
 		exit(1);
 	}
 
-	FILE *fp = fopen(argv[1], "rb");
+	char *file_path = NULL;
+	bool dump_memory = false;
+
+	// read command line args
+	for (int i=1; i<argc; ++i) {
+		char *arg = argv[i];
+		if (arg[0] == '-') {
+			if (0 == strcmp(arg, "--dump-memory")) 
+				dump_memory = true;
+		} else {
+			file_path = arg;
+		}
+	}
+
+	FILE *fp = fopen(file_path, "rb");
 	if (!fp) {
 		perror("fopen");
 		exit(1);
@@ -520,7 +555,7 @@ int main(int argc, char **argv) {
 	}
 
 	size_t count = buf_ptr - buf;
-	if (fwrite(buf, 1, buf_ptr - buf, fp) < count) {
+	if (fwrite(buf, 1, count, fp) < count) {
 		perror("fwrite");
 		fclose(fp);
 		exit(1);
@@ -535,6 +570,7 @@ int main(int argc, char **argv) {
 	}
 
 	dump_registers();
+	if (dump_memory) dump_memory_to_file();
 
 	return 0;
 }
