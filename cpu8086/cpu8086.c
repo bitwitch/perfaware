@@ -285,12 +285,19 @@ Instruction decode_instruction(void) {
 		uint16_t imm     = field_values[FIELD_DATA];
 
 		if (reg_mode) {
-			inst.operands[dir ? 0 : 1] = (Operand) { .kind = OPERAND_REG, .reg = reg_from_encoding(reg, inst.wide) };
-			inst.operands[dir ? 1 : 0] = (Operand) { .kind = OPERAND_REG, .reg = reg_from_encoding(r_m, inst.wide) };
+			Register r = reg_from_encoding(reg, inst.wide);
+			OperandKind kind = (r.index == REG_A) ? OPERAND_ACC : OPERAND_REG;
+			inst.operands[dir ? 0 : 1] = (Operand) { .kind = kind, .reg = r };
+
+			r = reg_from_encoding(r_m, inst.wide);
+			kind = (r.index == REG_A) ? OPERAND_ACC : OPERAND_REG;
+			inst.operands[dir ? 1 : 0] = (Operand) { .kind = kind, .reg = r };
 
 		} else {
 			// build register operand
-			inst.operands[dir ? 0 : 1] = (Operand) { .kind = OPERAND_REG, .reg = reg_from_encoding(reg, inst.wide) };
+			Register r = reg_from_encoding(reg, inst.wide);
+			OperandKind kind = (r.index == REG_A) ? OPERAND_ACC : OPERAND_REG;
+			inst.operands[dir ? 0 : 1] = (Operand) { .kind = kind, .reg = r };
 			// build memory operand
 			EffectiveAddress addr = effective_address_from_encoding(mode, r_m, disp);
 			inst.operands[dir ? 1 : 0] = (Operand) { .kind = OPERAND_MEM, .addr = addr };
@@ -304,7 +311,7 @@ Instruction decode_instruction(void) {
 		}
 
 		if (has_seg_reg) {
-			inst.operands[dir ? 0 : 1] = (Operand) { .kind = OPERAND_REG, .reg = seg_reg_from_encoding(sr) };
+			inst.operands[dir ? 0 : 1] = (Operand) { .kind = OPERAND_SEG_REG, .reg = seg_reg_from_encoding(sr) };
 		}
 
 		regs[REG_IP] += instruction_size;
@@ -379,12 +386,16 @@ void execute_op_byte(Operation op, uint8_t *dst, uint8_t val) {
 	
 }
 
+bool operand_is_reg(OperandKind kind) {
+	return kind == OPERAND_REG || kind == OPERAND_ACC || kind == OPERAND_SEG_REG;
+}
+
 void execute_instruction(Instruction *inst) {
 	Operand *operand_dst = &inst->operands[0];
 	Operand *operand_src = &inst->operands[1];
 	
 	uint16_t *dst;
-	if (operand_dst->kind == OPERAND_REG) {
+	if (operand_is_reg(operand_dst->kind)) {
 		Register reg = operand_dst->reg;
 		// NOTE(shaw): first cast to uint8_t* so that the offset only shifts the address by one byte
 		dst = (uint16_t*)((uint8_t*) &regs[reg.index] + reg.offset);
@@ -394,7 +405,7 @@ void execute_instruction(Instruction *inst) {
 	}
 
 	uint16_t src;
-	if (operand_src->kind == OPERAND_REG) {
+	if (operand_is_reg(operand_src->kind)) {
 		Register reg = operand_src->reg;
 		src = regs[reg.index] >> (8 * reg.offset);
 	} else if (operand_src->kind == OPERAND_MEM) {
@@ -414,7 +425,7 @@ void execute_instruction(Instruction *inst) {
 
 
 char *operand_to_string(Arena *arena, Operand *operand) {
-	if (operand->kind == OPERAND_REG)
+	if (operand_is_reg(operand->kind)) 
 		return reg_name(operand->reg);
 	
 	char *str = arena_alloc_zeroed(arena, OPERAND_BUF_SIZE);
@@ -453,6 +464,36 @@ char *operand_to_string(Arena *arena, Operand *operand) {
 	return str;
 }
 
+int calculate_ea_clocks(EffectiveAddress *ea) {
+	if (ea->is_direct)
+		return 6;
+	if (!ea->has_reg_offset && !ea->imm_offset)
+		return 5;
+	if (!ea->has_reg_offset && ea->imm_offset)
+		return 9;
+	if (ea->has_reg_offset && !ea->imm_offset) {
+		if (ea->reg_base.index == REG_BP && ea->reg_offset.index == REG_DI ||
+			ea->reg_base.index == REG_B  && ea->reg_offset.index == REG_SI) 
+		{
+			return 7;
+		} 
+		else
+			return 8;
+	}
+
+	// if displacement + base + index
+	{
+		if (ea->reg_base.index == REG_BP && ea->reg_offset.index == REG_DI ||
+			ea->reg_base.index == REG_B  && ea->reg_offset.index == REG_SI)
+		{
+			return 11;
+		}
+		else
+			return 12;
+	}
+}
+
+int total_clocks;
 char *disassemble_instruction(Arena *arena, Instruction *inst) {
 	// NOTE: this is just here during development to point out where you need 
 	// to add code when adding ops
@@ -490,7 +531,24 @@ char *disassemble_instruction(Arena *arena, Instruction *inst) {
 		size = inst->wide ? "word" : "byte";
 	}
 
-	buf_printf(&buf_ptr, "%s %s%s%s%s", mnemonics[inst->op], size, dst, sep, src);
+	int inst_clocks = 0;
+	for (int i=0; i<INSTRUCTION_CLOCKS_TABLE_MAX_LIST; ++i) {
+		InstructionClocksEntry entry = instruction_clocks_table[inst->op][i];
+		if (entry.dst == operand_dst->kind && entry.src == operand_src->kind) {
+			inst_clocks = entry.clocks;	
+			if (entry.add_ea_clocks) {
+				Operand *operand_mem = (operand_dst->kind == OPERAND_MEM) ? operand_dst : operand_src;
+				inst_clocks += calculate_ea_clocks(&operand_mem->addr);
+			}
+			break;
+		}
+	}
+
+	assert(inst_clocks > 0);
+	total_clocks += inst_clocks;
+
+	buf_printf(&buf_ptr, "%s %s%s%s%s ; clocks: +%d = %d", 
+		mnemonics[inst->op], size, dst, sep, src, inst_clocks, total_clocks);
 		
 	return asm_inst;
 }
