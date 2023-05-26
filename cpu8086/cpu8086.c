@@ -189,10 +189,7 @@ EffectiveAddress effective_address_from_encoding(uint8_t mode, uint8_t r_m, uint
 	return addr;
 }
 
-int instruction_count = 0; // JUST USED FOR DEBUGGING
 Instruction decode_instruction(void) {
-	++instruction_count;
-
 	uint8_t *stream = &memory[regs[REG_IP]];
 
 	Instruction inst = { 0 };
