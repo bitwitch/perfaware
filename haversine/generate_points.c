@@ -111,14 +111,16 @@ ClusterArray generate_clusters(void) {
 		max_x_divisions = 12,
 		max_y_divisions = 7,
 	};
-	f64 x_step = 60;
+
+	// maximum step in x and y
+	f64 x_step = 60; 
 	f64 y_step = 60;
 
 	// get x divisions
 	f64 x_divisions[max_x_divisions] = {-180};
 	int x_division_count = 1;
 	for (; x_division_count < max_x_divisions-1; ++x_division_count) {
-		x += random_f64(0, x_step);
+		x += random_f64(1, x_step);
 		if (x > 180) x = 180;
 		x_divisions[x_division_count] = x;
 		if (x == 180) break;
@@ -132,7 +134,7 @@ ClusterArray generate_clusters(void) {
 	f64 y_divisions[max_y_divisions] = {-90};
 	int y_division_count = 1;
 	for (; y_division_count < max_y_divisions-1; ++y_division_count) {
-		y += random_f64(0, y_step);
+		y += random_f64(1, y_step);
 		if (y > 90) y = 90;
 		y_divisions[y_division_count] = y;
 		if (y == 90) break;
