@@ -36,30 +36,30 @@ void *xrealloc(void *ptr, size_t size) {
 // File I/O
 // ---------------------------------------------------------------------------
 
-// TODO(shaw): null terminate the file data ??
 bool read_entire_file(char *filepath, char **file_data, size_t *out_size) {
-	FILE *f = fopen(filepath, "r");
+	FILE *f = fopen(filepath, "rb");
 	if (!f) {
 		return false;
 	}
 
 	fseek(f, 0, SEEK_END);
-	*out_size = ftell(f);
+	size_t file_size = ftell(f);
 	fseek(f, 0, SEEK_SET);
 
+	*out_size = file_size + 1;
 	*file_data = malloc(*out_size);
 	if (!*file_data) {
 		fclose(f);
 		return false;
 	}
 
-	size_t bytes_read = fread(*file_data, 1, *out_size, f);
-	printf("bytes_read=%zu out_size=%zu\n", bytes_read, *out_size);
-	if (bytes_read < *out_size && !feof(f)) {
+	size_t bytes_read = fread(*file_data, 1, file_size, f);
+	if (bytes_read < file_size && !feof(f)) {
 		fclose(f);
 		return false;
 	}
 
+	(*file_data)[bytes_read] = 0; // add null terminator
 	fclose(f);
 	return true;
 }
@@ -88,6 +88,7 @@ typedef struct {
 #define buf_end(b) ((b) + buf_lenu(b))
 #define buf_push(b, ...) (buf__fit(b, 1), (b)[buf__header(b)->len++] = (__VA_ARGS__))
 #define buf_free(b) ((b) ? (free(buf__header(b)), (b) = NULL) : 0)
+#define buf_printf(b, ...) ((b) = buf__printf((b), __VA_ARGS__))
 
 void *buf__grow(void *buf, size_t new_len, size_t elem_size) {
 	size_t new_cap = MAX(1 + 2*buf_cap(buf), new_len);
@@ -104,4 +105,27 @@ void *buf__grow(void *buf, size_t new_len, size_t elem_size) {
 	new_header->cap = new_cap;
 	return new_header->buf;
 }
+
+char *buf__printf(char *buf, char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int add_size = 1 + vsnprintf(NULL, 0, fmt, args);
+    va_end(args);
+
+	int cur_len = buf_len(buf);
+
+	buf__fit(buf, add_size);
+
+	char *start = cur_len ? buf + cur_len - 1 : buf;
+    va_start(args, fmt);
+    vsnprintf(start, add_size, fmt, args);
+    va_end(args);
+
+	// if appending to a string that is already null terminated, we clobber the
+	// original null terminator so we need to subtract 1
+	buf__header(buf)->len += cur_len ? add_size - 1 : add_size;
+
+	return buf;
+}
+
 

@@ -332,24 +332,20 @@ HaversineInput parse_haversine_input(void) {
 	JsonExpr *pairs = dict_get(json->dict, "pairs");
 
 	input.num_pairs = pairs->array.num_items;
-	input.pairs = xmalloc(input.num_pairs * sizeof(Pair));
+	input.pairs = xcalloc(input.num_pairs, sizeof(Pair));
 
 	for (int i=0; i < pairs->array.num_items; ++i) {
 		JsonExpr *item = pairs->array.items[i];
 		assert(item->kind == EXPR_DICT);
-		for (int j=0; j < item->dict.num_entries; ++j) {
-			Pair *pair = &input.pairs[i];
-			Entry entry = item->dict.entries[j];
-			if (strcmp(entry.key, "x0") == 0) {
-				pair->x0 = entry.val->float_val;
-			} else if (strcmp(entry.key, "y0") == 0) {
-				pair->y0 = entry.val->float_val;
-			} else if (strcmp(entry.key, "x1") == 0) {
-				pair->x1 = entry.val->float_val;
-			} else if (strcmp(entry.key, "y1") == 0) {
-				pair->y1 = entry.val->float_val;
-			}
-		}
+		Pair *pair = &input.pairs[i];
+		JsonExpr *x0 = dict_get(item->dict, "x0");
+		if (x0) pair->x0 = x0->float_val;
+		JsonExpr *y0 = dict_get(item->dict, "y0");
+		if (y0) pair->y0 = y0->float_val;
+		JsonExpr *x1 = dict_get(item->dict, "x1");
+		if (x1) pair->x1 = x1->float_val;
+		JsonExpr *y1 = dict_get(item->dict, "y1");
+		if (y1) pair->y1 = y1->float_val;
 	}
 	return input;
 }
@@ -395,6 +391,49 @@ static f64 reference_haversine(f64 x0, f64 y0, f64 x1, f64 y1, f64 earth_radius)
 //------------------------------------------------------------------------------
 // Entry Point
 //------------------------------------------------------------------------------
+#define EPSILON 0.00000000001
+void validate(char *answers_filepath, HaversineInput input) {
+	char *file_data;
+	size_t file_size;
+	bool ok = read_entire_file(answers_filepath, &file_data, &file_size);
+	if (!ok) {
+		fprintf(stderr, "error: failed to read file %s\n", answers_filepath);
+		exit(1);
+	}
+
+	BUF(char *failures) = NULL;
+
+	f64 *distances = (f64*)file_data;
+	f64 sum = 0;
+	for (size_t i=0; i<input.num_pairs; ++i) {
+		Pair pair = input.pairs[i];
+		f64 distance = reference_haversine(pair.x0, pair.y0, pair.x1, pair.y1, EARTH_RADIUS_KM);
+		sum += distance;
+		f64 error = distance - distances[i];
+		if (error > EPSILON) {
+			buf_printf(failures, "pair %zu: expected %.16f, got %.16f, difference %.16f\n", 
+				i, distances[i], distance, error);
+		}
+	}
+	f64 average = input.num_pairs > 0 ? sum / input.num_pairs : 0;
+	f64 generated_average = distances[input.num_pairs];
+
+	f64 difference = 0;
+	if (generated_average > 0) {
+		difference = average - generated_average;
+	}
+
+	printf("Number of pairs: %zu\n", input.num_pairs);
+	printf("Average haversine distance: %.16f\n", average);
+	printf("\nValidation:\n");
+	printf("Generated average haversine distance: %.16f\n", generated_average);
+	printf("Difference: %.16f\n", difference);
+	if (failures) {
+		printf("Failures:\n%s\n", failures);
+	}
+}
+#undef EPSILON
+
 int main(int argc, char **argv) {
 	if (argc < 2) {
 		printf("Usage: %s [haversine_input.json]\n", argv[0]);
@@ -405,26 +444,31 @@ int main(int argc, char **argv) {
 	char *input_filepath = argv[1];
 	char *answers_filepath = argc > 2 ? argv[2] : NULL;
 
-	printf("input filepath: %s\n", input_filepath);
-	printf("answers filepath: %s\n", answers_filepath);
-
 	char *file_data;
 	size_t file_size;
 	bool ok = read_entire_file(input_filepath, &file_data, &file_size);
 	if (!ok) {
-		perror("read_entire_file");
+		fprintf(stderr, "error: failed to read file %s\n", input_filepath);
 		exit(1);
 	}
 
-	printf("Successfully read file\n");
-	
 	init_parse(file_data);
 	HaversineInput input = parse_haversine_input();
 
-	for (int i=0; i<input.num_pairs; ++i) {
-		Pair pair = input.pairs[i];
-		f64 distance = reference_haversine(pair.x0, pair.y0, pair.x1, pair.y1, EARTH_RADIUS_KM);
-		printf("%f %f %f %f | dist=%f\n", pair.x0, pair.y0, pair.x1, pair.y1, distance);
+	if (answers_filepath) {
+		validate(answers_filepath, input);
+	} else {
+		f64 sum = 0;
+		for (int i=0; i<input.num_pairs; ++i) {
+			Pair pair = input.pairs[i];
+			f64 distance = reference_haversine(pair.x0, pair.y0, pair.x1, pair.y1, EARTH_RADIUS_KM);
+			sum += distance;
+		}
+		f64 average = input.num_pairs > 0 ? sum / input.num_pairs : 0;
+
+		printf("Number of pairs: %zu\n", input.num_pairs);
+		printf("Average haversine distance: %.16f\n", average);
+
 	}
 
 	return 0;
