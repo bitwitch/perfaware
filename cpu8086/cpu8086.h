@@ -1,6 +1,3 @@
-#define DISASSEM_BUF_SIZE       4096
-#define SINGLE_INST_BUF_SIZE    64
-#define OPERAND_BUF_SIZE        32
 #define MB                      1024*1024
 
 // NOTE(shaw): order is important for most of these regs, as they are used as indices

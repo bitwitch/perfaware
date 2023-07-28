@@ -194,6 +194,8 @@ InstructionEncoding instruction_table[] = {
 #define INSTRUCTION_CLOCKS_TABLE_MAX_LIST 16
 // table entry format: dest, source, clocks, add_ea_clocks
 InstructionClocksEntry instruction_clocks_table[][INSTRUCTION_CLOCKS_TABLE_MAX_LIST] = {
+	// TODO(shaw): some operand combinations are not filled out here like acc, imm
+	// this causes some listings like listing45 to fail. need to fill all this out
 	[OP_MOV] = {
 		{ OPERAND_MEM,     OPERAND_ACC,     10, false },
 		{ OPERAND_ACC,     OPERAND_MEM,     10, false },
@@ -215,6 +217,8 @@ InstructionClocksEntry instruction_clocks_table[][INSTRUCTION_CLOCKS_TABLE_MAX_L
 		{ OPERAND_MEM,     OPERAND_IMM,     17, true  },
 		{ OPERAND_ACC,     OPERAND_IMM,      4, false },
 	},
+
+	// TODO(shaw): add clock counts for other instructions
 };
 
 

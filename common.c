@@ -11,6 +11,9 @@
 #define MAX(a,b) (((a)>(b))?(a):(b))
 #define ARRAY_COUNT(a) sizeof(a)/sizeof(*(a))
 
+// ---------------------------------------------------------------------------
+// Helper Utilities
+// ---------------------------------------------------------------------------
 void *xmalloc(size_t size) {
     void *ptr = malloc(size);
     if (ptr == NULL) {
@@ -48,6 +51,25 @@ void fatal(char *fmt, ...) {
     exit(1);
 }
 
+char *chop_by_delimiter(char **str, char *delimiter) {
+    char *chopped = *str;
+
+    char *found = strstr(*str, delimiter);
+    if (found == NULL) {
+        *str += strlen(*str);
+        return chopped;
+    }
+
+    *found = '\0';
+    *str = found + strlen(delimiter);
+
+    return chopped;
+}
+
+
+// ---------------------------------------------------------------------------
+// File I/O
+// ---------------------------------------------------------------------------
 
 // this is the size of a chunk of data in each read. one is added to this in
 // the actual call to fread to leave space for a null character
@@ -130,54 +152,40 @@ int read_entire_file(FILE *fp, char **dataptr, size_t *sizeptr) {
     return READ_ENTIRE_FILE_OK;
 }
 
-char *chop_by_delimiter(char **str, char *delimiter) {
-    char *chopped = *str;
-
-    char *found = strstr(*str, delimiter);
-    if (found == NULL) {
-        *str += strlen(*str);
-        return chopped;
-    }
-
-    *found = '\0';
-    *str = found + strlen(delimiter);
-
-    return chopped;
-}
-
-// dynamic array or "stretchy buffers", a la sean barrett
 // ---------------------------------------------------------------------------
-
+// stretchy buffer, a la sean barrett
+// ---------------------------------------------------------------------------
 typedef struct {
 	size_t len;
 	size_t cap;
 	char buf[]; // flexible array member
-} DA_Header;
+} BufHeader;
 
 // get the metadata of the array which is stored before the actual buffer in memory
-#define da__header(b) ((DA_Header*)((char*)b - offsetof(DA_Header, buf)))
+#define buf__header(b) ((BufHeader*)((char*)b - offsetof(BufHeader, buf)))
 // checks if n new elements will fit in the array
-#define da__fits(b, n) (da_lenu(b) + (n) <= da_cap(b)) 
+#define buf__fits(b, n) (buf_lenu(b) + (n) <= buf_cap(b)) 
 // if n new elements will not fit in the array, grow the array by reallocating 
-#define da__fit(b, n) (da__fits(b, n) ? 0 : ((b) = da__grow((b), da_lenu(b) + (n), sizeof(*(b)))))
+#define buf__fit(b, n) (buf__fits(b, n) ? 0 : ((b) = buf__grow((b), buf_lenu(b) + (n), sizeof(*(b)))))
 
 #define BUF(x) x // annotates that x is a stretchy buffer
-#define da_len(b)  ((b) ? (int32_t)da__header(b)->len : 0)
-#define da_lenu(b) ((b) ?          da__header(b)->len : 0)
-#define da_set_len(b, l) da__header(b)->len = (l)
-#define da_cap(b) ((b) ? da__header(b)->cap : 0)
-#define da_end(b) ((b) + da_lenu(b))
-#define da_push(b, ...) (da__fit(b, 1), (b)[da__header(b)->len++] = (__VA_ARGS__))
-#define da_free(b) ((b) ? (free(da__header(b)), (b) = NULL) : 0)
+#define buf_len(b)  ((b) ? (int)buf__header(b)->len : 0)
+#define buf_lenu(b) ((b) ?      buf__header(b)->len : 0)
+#define buf_set_len(b, l) buf__header(b)->len = (l)
+#define buf_cap(b) ((b) ? buf__header(b)->cap : 0)
+#define buf_end(b) ((b) + buf_lenu(b))
+#define buf_push(b, ...) (buf__fit(b, 1), (b)[buf__header(b)->len++] = (__VA_ARGS__))
+#define buf_free(b) ((b) ? (free(buf__header(b)), (b) = NULL) : 0)
+#define buf_printf(b, ...) ((b) = buf__printf((b), __VA_ARGS__))
 
-void *da__grow(void *buf, size_t new_len, size_t elem_size) {
-	size_t new_cap = MAX(1 + 2*da_cap(buf), new_len);
+void *buf__grow(void *buf, size_t new_len, size_t elem_size) {
+	size_t new_cap = MAX(1 + 2*buf_cap(buf), new_len);
 	assert(new_len <= new_cap);
-	size_t new_size = offsetof(DA_Header, buf) + new_cap*elem_size;
+	size_t new_size = offsetof(BufHeader, buf) + new_cap*elem_size;
 
-	DA_Header *new_header;
+	BufHeader *new_header;
 	if (buf) {
-		new_header = xrealloc(da__header(buf), new_size);
+		new_header = xrealloc(buf__header(buf), new_size);
 	} else {
 		new_header = xmalloc(new_size);
 		new_header->len = 0;
@@ -186,7 +194,31 @@ void *da__grow(void *buf, size_t new_len, size_t elem_size) {
 	return new_header->buf;
 }
 
+char *buf__printf(char *buf, char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int add_size = 1 + vsnprintf(NULL, 0, fmt, args);
+    va_end(args);
+
+	int cur_len = buf_len(buf);
+
+	buf__fit(buf, add_size);
+
+	char *start = cur_len ? buf + cur_len - 1 : buf;
+    va_start(args, fmt);
+    vsnprintf(start, add_size, fmt, args);
+    va_end(args);
+
+	// if appending to a string that is already null terminated, we clobber the
+	// original null terminator so we need to subtract 1
+	buf__header(buf)->len += cur_len ? add_size - 1 : add_size;
+
+	return buf;
+}
+
+// ---------------------------------------------------------------------------
 // Arena Allocator
+// ---------------------------------------------------------------------------
 #define ARENA_BLOCK_SIZE 65536
 
 typedef struct {
@@ -199,7 +231,7 @@ void arena_grow(Arena *arena, size_t min_size) {
 	size_t size = MAX(ARENA_BLOCK_SIZE, min_size);
 	arena->ptr = xmalloc(size);
 	arena->end = arena->ptr + size;
-	da_push(arena->blocks, arena->ptr);
+	buf_push(arena->blocks, arena->ptr);
 }
 
 void *arena_alloc(Arena *arena, size_t size) {
@@ -218,8 +250,8 @@ void *arena_alloc_zeroed(Arena *arena, size_t size) {
 }
 
 void arena_free(Arena *arena) {
-	for (int i=0; i<da_len(arena->blocks); ++i) {
+	for (int i=0; i<buf_len(arena->blocks); ++i) {
 		free(arena->blocks[i]);
 	}
-	da_free(arena->blocks);
+	buf_free(arena->blocks);
 }

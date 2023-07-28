@@ -120,31 +120,6 @@ void dump_memory_to_file(void) {
 	fclose(fp);
 }
 
-
-// NOTE(shaw): this isn't great, it doesn't check if there is space in the buffer
-// it just writes. it can def be improved but but it works for now
-//
-// one of the great advantages of this is that we can write code like:
-// buf_printf(&buf_ptr, "mov %s, %s", operand_to_string(), operand_to_string());
-// and take advantage of format strings rather than having to manually keep
-// up with separators and shit like that
-// 
-// however it is wasteful of memory, because we end up allocating three times
-// in the above case, and two of them are redundant. keep in mind though that we 
-// are using the super fast arena allocator, so its not slow system allocations.
-//
-// maybe we should switch to just using fprintf, this will avoid redundant 
-// allocations, but then we have to do more manually string manupulation stuff
-// idk what is better yet...
-void buf_printf(char **buf, char *fmt, ...) {
-	va_list args;
-	va_start(args, fmt);
-	int count = vsprintf(*buf, fmt, args);
-	assert(count > 0);
-	va_end(args);
-	*buf += count;
-}
-
 Register reg_from_encoding(uint8_t encoding, bool wide) {
 	static Register reg_encoding_table[9][2] = {
 		{ { REG_A,  1, 0 }, { REG_A,  2, 0 } },
@@ -425,31 +400,30 @@ char *operand_to_string(Arena *arena, Operand *operand) {
 	if (operand_is_reg(operand->kind)) 
 		return reg_name(operand->reg);
 	
-	char *str = arena_alloc_zeroed(arena, OPERAND_BUF_SIZE);
-	char *buf_ptr = str;
+	BUF(char *operand_buf) = NULL;
 
 	switch (operand->kind) {
 	case OPERAND_IMM:
-		buf_printf(&buf_ptr, "%d", operand->imm);
+		buf_printf(operand_buf, "%d", operand->imm);
 		break;
 	case OPERAND_REL_IMM:
 		// HACK: this is assumming all OPERAND_REL_IMM are operands to conditional jumps
 		// and the +2 here is just because the nasm assembler uses a syntax where the immediate 
 		// offset is from the start of the instruction, whereas every other fucking thing is 
 		// relative to the end of the instruction
-		buf_printf(&buf_ptr, "$+%d", (int16_t)operand->imm + 2);
+		buf_printf(operand_buf, "$+%d", (int16_t)operand->imm + 2);
 		break;
 	case OPERAND_MEM: {
 		EffectiveAddress addr = operand->addr;
 		if (addr.is_direct) {
-			buf_printf(&buf_ptr, "[%d]", addr.imm_offset);
+			buf_printf(operand_buf, "[%d]", addr.imm_offset);
 		} else {
-			buf_printf(&buf_ptr, "[%s", reg_name(addr.reg_base));
+			buf_printf(operand_buf, "[%s", reg_name(addr.reg_base));
 			if (addr.has_reg_offset)
-				buf_printf(&buf_ptr, " + %s", reg_name(addr.reg_offset));
+				buf_printf(operand_buf, " + %s", reg_name(addr.reg_offset));
 			if (addr.imm_offset)
-				buf_printf(&buf_ptr, " + %d", addr.imm_offset);
-			buf_printf(&buf_ptr, "]");
+				buf_printf(operand_buf, " + %d", addr.imm_offset);
+			buf_printf(operand_buf, "]");
 		}
 		break;
 	}
@@ -458,7 +432,7 @@ char *operand_to_string(Arena *arena, Operand *operand) {
 		break;
 	}
 
-	return str;
+	return operand_buf;
 }
 
 int calculate_ea_clocks(EffectiveAddress *ea) {
@@ -511,8 +485,7 @@ char *disassemble_instruction(Arena *arena, Instruction *inst) {
 	Operand *operand_dst = &inst->operands[0];
 	Operand *operand_src = &inst->operands[1];
 
-	char *asm_inst = arena_alloc_zeroed(arena, SINGLE_INST_BUF_SIZE);
-	char *buf_ptr = asm_inst;
+	BUF(char *asm_inst) = NULL;
 
 	char *dst = "";
 	char *sep = "";
@@ -544,7 +517,7 @@ char *disassemble_instruction(Arena *arena, Instruction *inst) {
 	assert(inst_clocks > 0);
 	total_clocks += inst_clocks;
 
-	buf_printf(&buf_ptr, "%s %s%s%s%s ; clocks: +%d = %d", 
+	buf_printf(asm_inst, "%s %s%s%s%s ; clocks: +%d = %d", 
 		mnemonics[inst->op], size, dst, sep, src, inst_clocks, total_clocks);
 		
 	return asm_inst;
@@ -589,19 +562,16 @@ int main(int argc, char **argv) {
 	fclose(fp);
 
 	Arena string_arena = {0};
-	char buf[DISASSEM_BUF_SIZE];
-	char *buf_ptr = buf;
+	BUF(char *dasm_buf) = NULL;
 
-	buf_printf(&buf_ptr, "bits 16\n");
+	buf_printf(dasm_buf, "bits 16\n");
 
 	// disassemble 
 	while (regs[REG_IP] < file_size) {
 		Instruction inst = decode_instruction();
 		char *asm_inst = disassemble_instruction(&string_arena, &inst);
-		buf_printf(&buf_ptr, "%s\n", asm_inst);
+		buf_printf(dasm_buf, "%s\n", asm_inst);
 	}
-
-	*buf_ptr = 0;
 
 	fp = fopen("test.asm", "w");
 	if (!fp) {
@@ -609,8 +579,8 @@ int main(int argc, char **argv) {
 		exit(1);
 	}
 
-	size_t count = buf_ptr - buf;
-	if (fwrite(buf, 1, count, fp) < count) {
+	size_t count = buf_lenu(dasm_buf);
+	if (fwrite(dasm_buf, 1, count, fp) < count) {
 		perror("fwrite");
 		fclose(fp);
 		exit(1);
