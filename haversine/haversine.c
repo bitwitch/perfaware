@@ -435,10 +435,8 @@ void validate(char *answers_filepath, HaversineInput input) {
 #undef EPSILON
 
 int main(int argc, char **argv) {
-	uint64_t setup_ticks, read_json_ticks, parse_ticks, compute_haversine_ticks, cpu_start;
-
 	// setup
-	cpu_start = read_cpu_timer();
+	uint64_t cpu_start = read_cpu_timer();
 	if (argc < 2) {
 		printf("Usage: %s [haversine_input.json]\n", argv[0]);
 		printf("       %s [haversine_input.json] [answers.f64]\n", argv[0]);
@@ -447,7 +445,7 @@ int main(int argc, char **argv) {
 
 	char *input_filepath = argv[1];
 	char *answers_filepath = argc > 2 ? argv[2] : NULL;
-	setup_ticks = read_cpu_timer() - cpu_start;
+	uint64_t setup_ticks = read_cpu_timer() - cpu_start;
 
 	// reading json input file
 	cpu_start = read_cpu_timer();
@@ -458,13 +456,13 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "error: failed to read file %s\n", input_filepath);
 		exit(1);
 	}
-	read_json_ticks = read_cpu_timer() - cpu_start;
+	uint64_t read_json_ticks = read_cpu_timer() - cpu_start;
 
 	// parsing json
 	cpu_start = read_cpu_timer();
 	init_parse(file_data);
 	HaversineInput input = parse_haversine_input();
-	parse_ticks = read_cpu_timer() - cpu_start;
+	uint64_t parse_ticks = read_cpu_timer() - cpu_start;
 
 	// computing haversine distances
 	cpu_start = read_cpu_timer();
@@ -483,7 +481,7 @@ int main(int argc, char **argv) {
 		printf("Average haversine distance: %.16f\n", average);
 
 	}
-	compute_haversine_ticks = read_cpu_timer() - cpu_start;
+	uint64_t compute_haversine_ticks = read_cpu_timer() - cpu_start;
 
 	// timing
 	uint64_t cpu_freq = estimate_cpu_freq();
