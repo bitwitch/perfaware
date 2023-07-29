@@ -546,8 +546,8 @@ int main(int argc, char **argv) {
 	// TODO(shaw): read file directly into memory buffer to avoid the copy
 	char *file_data;
 	size_t file_size;
-	int rc = read_entire_file(file_path, &file_data, &file_size);
-	if (rc != READ_ENTIRE_FILE_OK) {
+	bool ok = read_entire_file(file_path, &file_data, &file_size);
+	if (!ok) {
 		fprintf(stderr, "Failed to read file %s\n", argv[1]);
 		exit(1);
 	}

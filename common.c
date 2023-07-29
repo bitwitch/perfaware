@@ -6,6 +6,13 @@
 #include <stddef.h>
 #include <stdarg.h>
 #include <assert.h>
+#include <sys/stat.h>
+
+#if _WIN32
+	#include "os_win32.c"
+#else
+	#include "os_linux.c"
+#endif
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
@@ -66,104 +73,6 @@ char *chop_by_delimiter(char **str, char *delimiter) {
     return chopped;
 }
 
-
-// ---------------------------------------------------------------------------
-// File I/O
-// ---------------------------------------------------------------------------
-
-// this is the size of a chunk of data in each read. one is added to this in
-// the actual call to fread to leave space for a null character
-#ifndef READFILE_CHUNK
-#define READFILE_CHUNK 2097152 // 2MiB
-#endif
-
-#define READ_ENTIRE_FILE_OK          0  /* Success */
-#define READ_ENTIRE_FILE_INVALID    -1  /* Invalid parameters */
-#define READ_ENTIRE_FILE_ERROR      -2  /* Stream error */
-#define READ_ENTIRE_FILE_TOOMUCH    -3  /* Too much input */
-#define READ_ENTIRE_FILE_NOMEM      -4  /* Out of memory */
-#define READ_ENTIRE_FILE_NOT_FOUND  -5  /* File not found */
-
-int read_entire_file(char *filepath, char **dataptr, size_t *sizeptr) {
-
-    /*
-     * See answer by Nominal Animal (note this is not the accepted answer)
-     * https://stackoverflow.com/questions/14002954/c-programming-how-to-read-the-whole-file-contents-into-a-buffer#answer-44894946
-     */
-
-    char *data = NULL, *temp;
-    uint64_t bytes_allocated = 0;
-    uint64_t read_so_far = 0;
-    uint64_t n; // bytes read in a single fread call
-
-    /* None of the parameters can be NULL. */
-    if (filepath == NULL || dataptr == NULL || sizeptr == NULL)
-        return READ_ENTIRE_FILE_INVALID;
-
-	FILE *fp = fopen(filepath, "rb");
-	if (!fp) {
-		return READ_ENTIRE_FILE_NOT_FOUND;
-	}
-
-    /* A read error already occurred? */
-    if (ferror(fp)) {
-		fclose(fp);
-        return READ_ENTIRE_FILE_ERROR;
-	}
-
-    while (1) {
-        /* first check if buffer is large enough to read another chunk */
-        uint64_t new_size = read_so_far + READFILE_CHUNK + 1;
-
-        if (bytes_allocated < new_size) {
-            /* need to grow the buffer */
-            bytes_allocated = new_size;
-
-            /* overflow check */
-            if (new_size <= read_so_far) {
-                free(data);
-				fclose(fp);
-                return READ_ENTIRE_FILE_TOOMUCH;
-            }
-
-            temp = realloc(data, new_size);
-            if (!temp) {
-                free(data);
-				fclose(fp);
-                return READ_ENTIRE_FILE_NOMEM;
-            }
-            data = temp;
-        }
-
-        /* read in a chunk */
-        n = fread(data+read_so_far, sizeof(char), READFILE_CHUNK, fp);
-        if (n == 0)
-            break;
-
-        read_so_far += n;
-    }
-
-    if (ferror(fp)) {
-        free(data);
-		fclose(fp);
-        return READ_ENTIRE_FILE_ERROR;
-    }
-
-    /* resize the buffer to the exact length of the file (plus 1 for null termination) */
-    temp = realloc(data, read_so_far + 1);
-    if (!temp) {
-        free(data);
-		fclose(fp);
-        return READ_ENTIRE_FILE_NOMEM;
-    }
-    data = temp;
-    data[read_so_far] = '\0';
-
-    *dataptr = data;
-    *sizeptr = read_so_far;
-	fclose(fp);
-    return READ_ENTIRE_FILE_OK;
-}
 
 // ---------------------------------------------------------------------------
 // stretchy buffer, a la sean barrett
@@ -267,4 +176,28 @@ void arena_free(Arena *arena) {
 		free(arena->blocks[i]);
 	}
 	buf_free(arena->blocks);
+}
+
+// ---------------------------------------------------------------------------
+// Timers
+// ---------------------------------------------------------------------------
+uint64_t read_cpu_timer(void) {
+	return __rdtsc();
+}
+
+uint64_t estimate_cpu_freq(void) {
+	uint64_t wait_time_ms = 100;
+	uint64_t os_freq = os_timer_freq();
+	uint64_t os_ticks_during_wait_time = os_freq * wait_time_ms / 1000;
+	uint64_t os_elapsed = 0;
+	uint64_t os_start = os_read_timer();
+	uint64_t cpu_start = read_cpu_timer();
+
+	while (os_elapsed < os_ticks_during_wait_time) {
+		os_elapsed = os_read_timer() - os_start;
+	}
+
+	uint64_t cpu_freq = (read_cpu_timer() - cpu_start) * os_freq / os_elapsed;
+
+	return cpu_freq;
 }
