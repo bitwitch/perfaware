@@ -8,7 +8,7 @@
 #include <ctype.h>
 #include <math.h>
 
-#include "common.c"
+#include "../common.c"
 
 #define EARTH_RADIUS_KM 6372.8
 
@@ -395,8 +395,8 @@ static f64 reference_haversine(f64 x0, f64 y0, f64 x1, f64 y1, f64 earth_radius)
 void validate(char *answers_filepath, HaversineInput input) {
 	char *file_data;
 	size_t file_size;
-	bool ok = read_entire_file(answers_filepath, &file_data, &file_size);
-	if (!ok) {
+	int rc = read_entire_file(answers_filepath, &file_data, &file_size);
+	if (rc != READ_ENTIRE_FILE_OK) {
 		fprintf(stderr, "error: failed to read file %s\n", answers_filepath);
 		exit(1);
 	}
@@ -446,8 +446,8 @@ int main(int argc, char **argv) {
 
 	char *file_data;
 	size_t file_size;
-	bool ok = read_entire_file(input_filepath, &file_data, &file_size);
-	if (!ok) {
+	int rc = read_entire_file(input_filepath, &file_data, &file_size);
+	if (rc != READ_ENTIRE_FILE_OK) {
 		fprintf(stderr, "error: failed to read file %s\n", input_filepath);
 		exit(1);
 	}

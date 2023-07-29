@@ -82,8 +82,9 @@ char *chop_by_delimiter(char **str, char *delimiter) {
 #define READ_ENTIRE_FILE_ERROR      -2  /* Stream error */
 #define READ_ENTIRE_FILE_TOOMUCH    -3  /* Too much input */
 #define READ_ENTIRE_FILE_NOMEM      -4  /* Out of memory */
+#define READ_ENTIRE_FILE_NOT_FOUND  -5  /* File not found */
 
-int read_entire_file(FILE *fp, char **dataptr, size_t *sizeptr) {
+int read_entire_file(char *filepath, char **dataptr, size_t *sizeptr) {
 
     /*
      * See answer by Nominal Animal (note this is not the accepted answer)
@@ -96,12 +97,19 @@ int read_entire_file(FILE *fp, char **dataptr, size_t *sizeptr) {
     uint64_t n; // bytes read in a single fread call
 
     /* None of the parameters can be NULL. */
-    if (fp == NULL || dataptr == NULL || sizeptr == NULL)
+    if (filepath == NULL || dataptr == NULL || sizeptr == NULL)
         return READ_ENTIRE_FILE_INVALID;
 
+	FILE *fp = fopen(filepath, "rb");
+	if (!fp) {
+		return READ_ENTIRE_FILE_NOT_FOUND;
+	}
+
     /* A read error already occurred? */
-    if (ferror(fp))
+    if (ferror(fp)) {
+		fclose(fp);
         return READ_ENTIRE_FILE_ERROR;
+	}
 
     while (1) {
         /* first check if buffer is large enough to read another chunk */
@@ -114,12 +122,14 @@ int read_entire_file(FILE *fp, char **dataptr, size_t *sizeptr) {
             /* overflow check */
             if (new_size <= read_so_far) {
                 free(data);
+				fclose(fp);
                 return READ_ENTIRE_FILE_TOOMUCH;
             }
 
             temp = realloc(data, new_size);
             if (!temp) {
                 free(data);
+				fclose(fp);
                 return READ_ENTIRE_FILE_NOMEM;
             }
             data = temp;
@@ -135,6 +145,7 @@ int read_entire_file(FILE *fp, char **dataptr, size_t *sizeptr) {
 
     if (ferror(fp)) {
         free(data);
+		fclose(fp);
         return READ_ENTIRE_FILE_ERROR;
     }
 
@@ -142,6 +153,7 @@ int read_entire_file(FILE *fp, char **dataptr, size_t *sizeptr) {
     temp = realloc(data, read_so_far + 1);
     if (!temp) {
         free(data);
+		fclose(fp);
         return READ_ENTIRE_FILE_NOMEM;
     }
     data = temp;
@@ -149,6 +161,7 @@ int read_entire_file(FILE *fp, char **dataptr, size_t *sizeptr) {
 
     *dataptr = data;
     *sizeptr = read_so_far;
+	fclose(fp);
     return READ_ENTIRE_FILE_OK;
 }
 

@@ -543,23 +543,16 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	FILE *fp = fopen(file_path, "rb");
-	if (!fp) {
-		perror("fopen");
-		exit(1);
-	}
-
 	// TODO(shaw): read file directly into memory buffer to avoid the copy
 	char *file_data;
 	size_t file_size;
-	int rc = read_entire_file(fp, &file_data, &file_size);
+	int rc = read_entire_file(file_path, &file_data, &file_size);
 	if (rc != READ_ENTIRE_FILE_OK) {
 		fprintf(stderr, "Failed to read file %s\n", argv[1]);
 		exit(1);
 	}
 	assert(file_size <= 1*MB);
 	memcpy(memory, file_data, file_size);
-	fclose(fp);
 
 	Arena string_arena = {0};
 	BUF(char *dasm_buf) = NULL;
@@ -573,7 +566,7 @@ int main(int argc, char **argv) {
 		buf_printf(dasm_buf, "%s\n", asm_inst);
 	}
 
-	fp = fopen("test.asm", "w");
+	FILE *fp = fopen("test.asm", "w");
 	if (!fp) {
 		perror("fopen");
 		exit(1);
