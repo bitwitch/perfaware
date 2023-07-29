@@ -298,17 +298,23 @@ JsonExpr *parse_expr_float(void) {
 }
 
 JsonExpr *parse_expr(void) {
+	PROFILE_FUNCTION_BEGIN;
 	switch (token.kind) {
 		case TOKEN_LEFT_BRACE:
+			PROFILE_FUNCTION_END;
 			return parse_expr_dict();
 		case TOKEN_LEFT_BRACKET:
+			PROFILE_FUNCTION_END;
 			return parse_expr_array();
 		case TOKEN_STRING:
+			PROFILE_FUNCTION_END;
 			return parse_expr_string();
 		case TOKEN_FLOAT:
+			PROFILE_FUNCTION_END;
 			return parse_expr_float();
 		default:
 			parse_error("Expected dict, array, string, or float");
+			PROFILE_FUNCTION_END;
 			return NULL;
 	}
 }

@@ -199,33 +199,83 @@ uint64_t estimate_cpu_freq(void) {
 
 typedef struct {
 	char *name;
+	int count;
+	uint64_t total_elapsed;
+} ProfileBlockInfo;
+
+typedef struct {
+	char *name;
+	int counter;
 	uint64_t start, stop;
 } ProfileTsPair;
 
+BUF(ProfileBlockInfo *profile_info);
 BUF(ProfileTsPair *profile_timestamps);
 uint64_t profile_start;
 
-ProfileTsPair *ts_pair_from_name(char *name) {
+
+// FIXME(shaw): all of these linear searches in the profiling utility are going to scale really poorly
+// and be slow af. they are just used to prove out a concept quickly.
+
+ProfileTsPair *get_ts_pair(char *name, int counter) {
 	for (int i=0; i<buf_len(profile_timestamps); ++i) {
-		if (strcmp(profile_timestamps[i].name, name) == 0) {
+		if (profile_timestamps[i].counter == counter && strcmp(profile_timestamps[i].name, name) == 0) {
 			return &profile_timestamps[i];
 		}
 	}
 	return NULL;
 }
 
-#define PROFILE_FUNCTION_BEGIN buf_push(profile_timestamps, (ProfileTsPair){.name = __func__, .start = read_cpu_timer()})
+// increments the count of the function identified by name and returns the
+// previous function call count
+int increment_func_call_count(char *name) {
+	for (int i=0; i<buf_len(profile_info); ++i) {
+		if (strcmp(profile_info[i].name, name) == 0) {
+			int prev_count = profile_info[i].count;
+			++profile_info[i].count;
+			return prev_count;
+		}
+	}
+
+	// not found, create new entry
+	buf_push(profile_info, (ProfileBlockInfo){.name=name, .count=1});
+	return 0;
+}
+
+void record_profile_block_time(char *name, uint64_t elapsed) {
+	for (int i=0; i<buf_len(profile_info); ++i) {
+		if (strcmp(profile_info[i].name, name) == 0) {
+			profile_info[i].total_elapsed += elapsed;
+			return;
+		}
+	}
+	// couldn't find function with name in profile_info, should never happen
+	assert(0);
+}
+
+// NOTE(shaw): this macro is not guarded with typical do-while because it relies on __profile_count
+// being defined in the associated PROFILE_FUNCTION_END
+#define PROFILE_FUNCTION_BEGIN \
+	int __profile_count = increment_func_call_count(__func__); \
+	buf_push(profile_timestamps, (ProfileTsPair){.name = __func__, .counter = __profile_count, .start = read_cpu_timer()});
 
 #define PROFILE_FUNCTION_END do { \
-	ProfileTsPair *ts_pair = ts_pair_from_name(__func__); \
-	if (ts_pair) ts_pair->stop = read_cpu_timer(); \
+	ProfileTsPair *ts_pair = get_ts_pair(__func__, __profile_count); \
+	if (ts_pair) { \
+		ts_pair->stop = read_cpu_timer(); \
+		record_profile_block_time(__func__, ts_pair->stop - ts_pair->start); \
+	} \
 } while(0)
 
-#define PROFILE_BLOCK_BEGIN(block_name) buf_push(profile_timestamps, (ProfileTsPair){.name = block_name, .start = read_cpu_timer()})
+#define PROFILE_BLOCK_BEGIN(block_name) \
+	buf_push(profile_timestamps, (ProfileTsPair){.name = block_name, .start = read_cpu_timer()})
 
 #define PROFILE_BLOCK_END(block_name) do { \
-	ProfileTsPair *ts_pair = ts_pair_from_name(block_name); \
-	if (ts_pair) ts_pair->stop = read_cpu_timer(); \
+	ProfileTsPair *ts_pair = get_ts_pair(block_name, 0); \
+	if (ts_pair) { \
+		ts_pair->stop = read_cpu_timer(); \
+		record_profile_block_time(block_name, ts_pair->stop - ts_pair->start); \
+	} \
 } while(0)
 
 
@@ -242,11 +292,10 @@ void end_profile(void) {
 
 	printf("\nTotal time: %fms (cpu freq %llu)\n", total_ms, cpu_freq);
 
-	for (int i=0; i<buf_len(profile_timestamps); ++i) {
-		ProfileTsPair ts = profile_timestamps[i];
-		uint64_t elapsed = ts.stop - ts.start;
-		double pct = 100 * (elapsed / (double)total_ticks);
-		printf("\t%s: %llu (%.2f%%)\n", ts.name, elapsed, pct);
+	for (int i=0; i<buf_len(profile_info); ++i) {
+		ProfileBlockInfo info = profile_info[i];
+		double pct = 100 * (info.total_elapsed / (double)total_ticks);
+		printf("\t%s: %llu (%.2f%%)\n", info.name, info.total_elapsed, pct);
 	}
 }
 	
