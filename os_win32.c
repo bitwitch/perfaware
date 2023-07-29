@@ -14,6 +14,9 @@ uint64_t os_read_timer(void) {
 }
 
 bool read_entire_file(char *filepath, char **file_data, size_t *out_size) {
+	PROFILE_FUNCTION_BEGIN;
+	printf("read_entire_file begin counter: %d\n", __COUNTER__);
+
 	FILE *f = fopen(filepath, "rb");
 	if (!f) {
 		return false;
@@ -39,5 +42,8 @@ bool read_entire_file(char *filepath, char **file_data, size_t *out_size) {
 
 	(*file_data)[bytes_read] = 0; // add null terminator
 	fclose(f);
+
+	printf("read_entire_file end counter: %d\n", __COUNTER__);
+	PROFILE_FUNCTION_END;
 	return true;
 }

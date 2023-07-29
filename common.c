@@ -7,12 +7,7 @@
 #include <stdarg.h>
 #include <assert.h>
 #include <sys/stat.h>
-
-#if _WIN32
-	#include "os_win32.c"
-#else
-	#include "os_linux.c"
-#endif
+#include "os.h"
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
@@ -179,7 +174,7 @@ void arena_free(Arena *arena) {
 }
 
 // ---------------------------------------------------------------------------
-// Timers
+// Timers and Profiling
 // ---------------------------------------------------------------------------
 uint64_t read_cpu_timer(void) {
 	return __rdtsc();
@@ -201,3 +196,78 @@ uint64_t estimate_cpu_freq(void) {
 
 	return cpu_freq;
 }
+
+typedef struct {
+	char *name;
+	uint64_t start, stop;
+} ProfileTsPair;
+
+BUF(ProfileTsPair *profile_timestamps);
+uint64_t profile_start;
+
+ProfileTsPair *ts_pair_from_name(char *name) {
+	for (int i=0; i<buf_len(profile_timestamps); ++i) {
+		if (strcmp(profile_timestamps[i].name, name) == 0) {
+			return &profile_timestamps[i];
+		}
+	}
+	return NULL;
+}
+
+#define PROFILE_FUNCTION_BEGIN buf_push(profile_timestamps, (ProfileTsPair){.name = __func__, .start = read_cpu_timer()})
+
+#define PROFILE_FUNCTION_END do { \
+	ProfileTsPair *ts_pair = ts_pair_from_name(__func__); \
+	if (ts_pair) ts_pair->stop = read_cpu_timer(); \
+} while(0)
+
+#define PROFILE_BLOCK_BEGIN(block_name) buf_push(profile_timestamps, (ProfileTsPair){.name = block_name, .start = read_cpu_timer()})
+
+#define PROFILE_BLOCK_END(block_name) do { \
+	ProfileTsPair *ts_pair = ts_pair_from_name(block_name); \
+	if (ts_pair) ts_pair->stop = read_cpu_timer(); \
+} while(0)
+
+
+void begin_profile(void) {
+	profile_start = read_cpu_timer();
+}
+
+void end_profile(void) {
+	uint64_t total_ticks = read_cpu_timer() - profile_start;
+	assert(total_ticks);
+	uint64_t cpu_freq = estimate_cpu_freq();
+	assert(cpu_freq);
+	double total_ms = 1000 * (total_ticks / (double)cpu_freq);
+
+	printf("\nTotal time: %fms (cpu freq %llu)\n", total_ms, cpu_freq);
+
+	for (int i=0; i<buf_len(profile_timestamps); ++i) {
+		ProfileTsPair ts = profile_timestamps[i];
+		uint64_t elapsed = ts.stop - ts.start;
+		double pct = 100 * (elapsed / (double)total_ticks);
+		printf("\t%s: %llu (%.2f%%)\n", ts.name, elapsed, pct);
+	}
+}
+	
+// ---------------------------------------------------------------------------
+// OS Specific Functions
+// ---------------------------------------------------------------------------
+
+#undef MIN
+#undef MAX
+#undef ARRAY_COUNT
+
+#if _WIN32
+	#include "os_win32.c"
+#else
+	#include "os_linux.c"
+#endif
+
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
+#define ARRAY_COUNT(a) sizeof(a)/sizeof(*(a))
+
+
+
+
