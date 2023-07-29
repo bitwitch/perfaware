@@ -395,8 +395,8 @@ static f64 reference_haversine(f64 x0, f64 y0, f64 x1, f64 y1, f64 earth_radius)
 void validate(char *answers_filepath, HaversineInput input) {
 	char *file_data;
 	size_t file_size;
-	int rc = read_entire_file(answers_filepath, &file_data, &file_size);
-	if (rc != READ_ENTIRE_FILE_OK) {
+	bool ok = read_entire_file(answers_filepath, &file_data, &file_size);
+	if (!ok) {
 		fprintf(stderr, "error: failed to read file %s\n", answers_filepath);
 		exit(1);
 	}
@@ -435,6 +435,10 @@ void validate(char *answers_filepath, HaversineInput input) {
 #undef EPSILON
 
 int main(int argc, char **argv) {
+	uint64_t setup_ticks, read_json_ticks, parse_ticks, compute_haversine_ticks, cpu_start;
+
+	// setup
+	cpu_start = read_cpu_timer();
 	if (argc < 2) {
 		printf("Usage: %s [haversine_input.json]\n", argv[0]);
 		printf("       %s [haversine_input.json] [answers.f64]\n", argv[0]);
@@ -443,18 +447,27 @@ int main(int argc, char **argv) {
 
 	char *input_filepath = argv[1];
 	char *answers_filepath = argc > 2 ? argv[2] : NULL;
+	setup_ticks = read_cpu_timer() - cpu_start;
 
+	// reading json input file
+	cpu_start = read_cpu_timer();
 	char *file_data;
 	size_t file_size;
-	int rc = read_entire_file(input_filepath, &file_data, &file_size);
-	if (rc != READ_ENTIRE_FILE_OK) {
+	bool ok = read_entire_file(input_filepath, &file_data, &file_size);
+	if (!ok) {
 		fprintf(stderr, "error: failed to read file %s\n", input_filepath);
 		exit(1);
 	}
+	read_json_ticks = read_cpu_timer() - cpu_start;
 
+	// parsing json
+	cpu_start = read_cpu_timer();
 	init_parse(file_data);
 	HaversineInput input = parse_haversine_input();
+	parse_ticks = read_cpu_timer() - cpu_start;
 
+	// computing haversine distances
+	cpu_start = read_cpu_timer();
 	if (answers_filepath) {
 		validate(answers_filepath, input);
 	} else {
@@ -470,6 +483,23 @@ int main(int argc, char **argv) {
 		printf("Average haversine distance: %.16f\n", average);
 
 	}
+	compute_haversine_ticks = read_cpu_timer() - cpu_start;
+
+	// timing
+	uint64_t cpu_freq = estimate_cpu_freq();
+	uint64_t total_ticks = setup_ticks + read_json_ticks + parse_ticks + compute_haversine_ticks;
+	double total_ms = 1000 * (total_ticks / (double)cpu_freq);
+
+	double setup_pct             = 100 * (setup_ticks / (double)total_ticks);
+	double read_json_pct         = 100 * (read_json_ticks / (double)total_ticks);
+	double parse_pct             = 100 * (parse_ticks / (double)total_ticks);
+	double compute_haversine_pct = 100 * (compute_haversine_ticks / (double)total_ticks);
+	
+	printf("\nTotal time: %fms (cpu freq %llu)\n", total_ms, cpu_freq);
+	printf("\tsetup: %llu (%.2f%%)\n", setup_ticks, setup_pct);
+	printf("\treading json input file: %llu (%.2f%%)\n", read_json_ticks, read_json_pct);
+	printf("\tparsing json: %llu (%.2f%%)\n", parse_ticks, parse_pct);
+	printf("\tcomputing haversine distances: %llu (%.2f%%)\n", compute_haversine_ticks, compute_haversine_pct);
 
 	return 0;
 }
