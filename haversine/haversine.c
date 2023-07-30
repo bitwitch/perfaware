@@ -263,6 +263,7 @@ char *parse_string(void) {
 }
 
 JsonExpr *parse_expr_dict(void) {
+	PROFILE_FUNCTION_BEGIN;
 	expect_token(TOKEN_LEFT_BRACE);
 	BUF(Entry *entries) = NULL;
 	do {
@@ -273,6 +274,7 @@ JsonExpr *parse_expr_dict(void) {
 	} while (match_token(TOKEN_COMMA));
 	expect_token(TOKEN_RIGHT_BRACE);
 	JsonExpr *dict = expr_dict(entries, buf_len(entries));
+	PROFILE_FUNCTION_END;
 	return dict;
 }
 

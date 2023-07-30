@@ -212,11 +212,12 @@ typedef struct {
 
 BUF(ProfileBlockInfo *profile_info);
 uint64_t profile_start;
+uint64_t current_profile_block_index;
 
 // FIXME(shaw): all of these linear searches in the profiling utility are going to scale really poorly
 // and be slow af. they are just used to prove out a concept quickly.
 void enter_profile_block(char *name) {
-	// NOTE(shaw): first entry is sentinal so skip it
+	// NOTE(shaw): i=1, first entry is sentinal so skip it
 	for (int i=1; i<buf_len(profile_info); ++i) {
 		if (strcmp(profile_info[i].name, name) == 0) {
 			int prev_count = profile_info[i].count;
@@ -225,18 +226,20 @@ void enter_profile_block(char *name) {
 		}
 	}
 	// not found, create new entry
-	buf_push(profile_info, (ProfileBlockInfo){.name=name, .count=1});
+	buf_push(profile_info, (ProfileBlockInfo){.name=name, .count=1, .parent_index=current_profile_block_index});
+	current_profile_block_index = buf_len(profile_info) - 1;
 }
 
 void leave_profile_block(char *name, uint64_t elapsed) {
 	// NOTE(shaw): first entry is sentinal so skip it
 	for (int i=1; i<buf_len(profile_info); ++i) {
 		if (strcmp(profile_info[i].name, name) == 0) {
-			// uint64_t parent_index = profile_info[i].parent_index;
-			// if (parent_index) {
-				// profile_info[parent_index].children_elapsed += elapsed;
-			// }
+			uint64_t parent_index = profile_info[i].parent_index;
+			if (parent_index) {
+				profile_info[parent_index].children_elapsed += elapsed;
+			}
 			profile_info[i].total_elapsed += elapsed;
+			current_profile_block_index = parent_index;
 			return;
 		}
 	}
@@ -279,7 +282,15 @@ void end_profile(void) {
 	for (int i=1; i<buf_len(profile_info); ++i) {
 		ProfileBlockInfo info = profile_info[i];
 		double pct = 100 * (info.total_elapsed / (double)total_ticks);
-		printf("\t%s[%d]: %llu (%.2f%%)\n", info.name, info.count, info.total_elapsed, pct);
+
+		if (info.children_elapsed) {
+			uint64_t exclusive_ticks = info.total_elapsed - info.children_elapsed;
+			double exclusive_pct = 100 * (exclusive_ticks/ (double)total_ticks);
+			printf("\t%s[%d]: %llu (%.2f%%, %.2f%% w/ children)\n", info.name, info.count, info.total_elapsed, exclusive_pct, pct);
+		} else {
+			printf("\t%s[%d]: %llu (%.2f%%)\n", info.name, info.count, info.total_elapsed, pct);
+		}
+
 	}
 }
 	
