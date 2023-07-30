@@ -217,15 +217,6 @@ uint64_t profile_start;
 // FIXME(shaw): all of these linear searches in the profiling utility are going to scale really poorly
 // and be slow af. they are just used to prove out a concept quickly.
 
-ProfileTsPair *get_ts_pair(char *name, int counter) {
-	for (int i=0; i<buf_len(profile_timestamps); ++i) {
-		if (profile_timestamps[i].counter == counter && strcmp(profile_timestamps[i].name, name) == 0) {
-			return &profile_timestamps[i];
-		}
-	}
-	return NULL;
-}
-
 // increments the count of the function identified by name and returns the
 // previous function call count
 int increment_func_call_count(char *name) {
@@ -257,25 +248,23 @@ void record_profile_block_time(char *name, uint64_t elapsed) {
 // being defined in the associated PROFILE_FUNCTION_END
 #define PROFILE_FUNCTION_BEGIN \
 	int __profile_count = increment_func_call_count(__func__); \
+	uint64_t __profile_block_index = buf_len(profile_timestamps); \
 	buf_push(profile_timestamps, (ProfileTsPair){.name = __func__, .counter = __profile_count, .start = read_cpu_timer()});
 
 #define PROFILE_FUNCTION_END do { \
-	ProfileTsPair *ts_pair = get_ts_pair(__func__, __profile_count); \
-	if (ts_pair) { \
-		ts_pair->stop = read_cpu_timer(); \
-		record_profile_block_time(__func__, ts_pair->stop - ts_pair->start); \
-	} \
+	ProfileTsPair *ts_pair = &profile_timestamps[__profile_block_index]; \
+	ts_pair->stop = read_cpu_timer(); \
+	record_profile_block_time(__func__, ts_pair->stop - ts_pair->start); \
 } while(0)
 
 #define PROFILE_BLOCK_BEGIN(block_name) \
+	uint64_t __profile_block_index = buf_len(profile_timestamps); \
 	buf_push(profile_timestamps, (ProfileTsPair){.name = block_name, .start = read_cpu_timer()})
 
 #define PROFILE_BLOCK_END(block_name) do { \
-	ProfileTsPair *ts_pair = get_ts_pair(block_name, 0); \
-	if (ts_pair) { \
-		ts_pair->stop = read_cpu_timer(); \
-		record_profile_block_time(block_name, ts_pair->stop - ts_pair->start); \
-	} \
+	ProfileTsPair *ts_pair = &profile_timestamps[__profile_block_index]; \
+	ts_pair->stop = read_cpu_timer(); \
+	record_profile_block_time(block_name, ts_pair->stop - ts_pair->start); \
 } while(0)
 
 
@@ -295,7 +284,7 @@ void end_profile(void) {
 	for (int i=0; i<buf_len(profile_info); ++i) {
 		ProfileBlockInfo info = profile_info[i];
 		double pct = 100 * (info.total_elapsed / (double)total_ticks);
-		printf("\t%s: %llu (%.2f%%)\n", info.name, info.total_elapsed, pct);
+		printf("\t%s[%d]: %llu (%.2f%%)\n", info.name, info.count, info.total_elapsed, pct);
 	}
 }
 	
