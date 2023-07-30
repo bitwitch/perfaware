@@ -201,41 +201,41 @@ typedef struct {
 	char *name;
 	int count;
 	uint64_t total_elapsed;
+	uint64_t children_elapsed;
+	uint64_t parent_index;
 } ProfileBlockInfo;
 
 typedef struct {
 	char *name;
-	int counter;
 	uint64_t start, stop;
 } ProfileTsPair;
 
 BUF(ProfileBlockInfo *profile_info);
-BUF(ProfileTsPair *profile_timestamps);
 uint64_t profile_start;
-
 
 // FIXME(shaw): all of these linear searches in the profiling utility are going to scale really poorly
 // and be slow af. they are just used to prove out a concept quickly.
-
-// increments the count of the function identified by name and returns the
-// previous function call count
-int increment_func_call_count(char *name) {
-	for (int i=0; i<buf_len(profile_info); ++i) {
+void enter_profile_block(char *name) {
+	// NOTE(shaw): first entry is sentinal so skip it
+	for (int i=1; i<buf_len(profile_info); ++i) {
 		if (strcmp(profile_info[i].name, name) == 0) {
 			int prev_count = profile_info[i].count;
 			++profile_info[i].count;
-			return prev_count;
+			return;
 		}
 	}
-
 	// not found, create new entry
 	buf_push(profile_info, (ProfileBlockInfo){.name=name, .count=1});
-	return 0;
 }
 
-void record_profile_block_time(char *name, uint64_t elapsed) {
-	for (int i=0; i<buf_len(profile_info); ++i) {
+void leave_profile_block(char *name, uint64_t elapsed) {
+	// NOTE(shaw): first entry is sentinal so skip it
+	for (int i=1; i<buf_len(profile_info); ++i) {
 		if (strcmp(profile_info[i].name, name) == 0) {
+			// uint64_t parent_index = profile_info[i].parent_index;
+			// if (parent_index) {
+				// profile_info[parent_index].children_elapsed += elapsed;
+			// }
 			profile_info[i].total_elapsed += elapsed;
 			return;
 		}
@@ -244,32 +244,26 @@ void record_profile_block_time(char *name, uint64_t elapsed) {
 	assert(0);
 }
 
-// NOTE(shaw): this macro is not guarded with typical do-while because it relies on __profile_count
-// being defined in the associated PROFILE_FUNCTION_END
-#define PROFILE_FUNCTION_BEGIN \
-	int __profile_count = increment_func_call_count(__func__); \
-	uint64_t __profile_block_index = buf_len(profile_timestamps); \
-	buf_push(profile_timestamps, (ProfileTsPair){.name = __func__, .counter = __profile_count, .start = read_cpu_timer()});
 
-#define PROFILE_FUNCTION_END do { \
-	ProfileTsPair *ts_pair = &profile_timestamps[__profile_block_index]; \
-	ts_pair->stop = read_cpu_timer(); \
-	record_profile_block_time(__func__, ts_pair->stop - ts_pair->start); \
-} while(0)
-
+// NOTE(shaw): this macro is not guarded with typical do-while because it relies on __block_start
+// being defined in the associated PROFILE_BLOCK_END
 #define PROFILE_BLOCK_BEGIN(block_name) \
-	uint64_t __profile_block_index = buf_len(profile_timestamps); \
-	buf_push(profile_timestamps, (ProfileTsPair){.name = block_name, .start = read_cpu_timer()})
+	enter_profile_block(block_name); \
+	uint64_t __block_start = read_cpu_timer();
 
 #define PROFILE_BLOCK_END(block_name) do { \
-	ProfileTsPair *ts_pair = &profile_timestamps[__profile_block_index]; \
-	ts_pair->stop = read_cpu_timer(); \
-	record_profile_block_time(block_name, ts_pair->stop - ts_pair->start); \
+	uint64_t elapsed = read_cpu_timer() - __block_start; \
+	leave_profile_block(block_name, elapsed); \
 } while(0)
 
+#define PROFILE_FUNCTION_BEGIN PROFILE_BLOCK_BEGIN(__func__)
+#define PROFILE_FUNCTION_END PROFILE_BLOCK_END(__func__)
 
 void begin_profile(void) {
 	profile_start = read_cpu_timer();
+	// put an empty sentinal entry into profile_info
+	assert(buf_len(profile_info) == 0);
+	buf_push(profile_info, (ProfileBlockInfo){0});
 }
 
 void end_profile(void) {
@@ -281,7 +275,8 @@ void end_profile(void) {
 
 	printf("\nTotal time: %fms (cpu freq %llu)\n", total_ms, cpu_freq);
 
-	for (int i=0; i<buf_len(profile_info); ++i) {
+	// NOTE(shaw): first entry is sentinal so skip it
+	for (int i=1; i<buf_len(profile_info); ++i) {
 		ProfileBlockInfo info = profile_info[i];
 		double pct = 100 * (info.total_elapsed / (double)total_ticks);
 		printf("\t%s[%d]: %llu (%.2f%%)\n", info.name, info.count, info.total_elapsed, pct);

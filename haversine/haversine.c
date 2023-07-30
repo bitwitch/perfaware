@@ -272,7 +272,8 @@ JsonExpr *parse_expr_dict(void) {
 		buf_push(entries, (Entry){key, val});
 	} while (match_token(TOKEN_COMMA));
 	expect_token(TOKEN_RIGHT_BRACE);
-	return expr_dict(entries, buf_len(entries));
+	JsonExpr *dict = expr_dict(entries, buf_len(entries));
+	return dict;
 }
 
 JsonExpr *parse_expr_array(void) {
@@ -298,36 +299,33 @@ JsonExpr *parse_expr_float(void) {
 }
 
 JsonExpr *parse_expr(void) {
-	PROFILE_FUNCTION_BEGIN;
 	switch (token.kind) {
 		case TOKEN_LEFT_BRACE:
-			PROFILE_FUNCTION_END;
 			return parse_expr_dict();
 		case TOKEN_LEFT_BRACKET:
-			PROFILE_FUNCTION_END;
 			return parse_expr_array();
 		case TOKEN_STRING:
-			PROFILE_FUNCTION_END;
 			return parse_expr_string();
 		case TOKEN_FLOAT:
-			PROFILE_FUNCTION_END;
 			return parse_expr_float();
 		default:
 			parse_error("Expected dict, array, string, or float");
-			PROFILE_FUNCTION_END;
 			return NULL;
 	}
 }
 
 JsonExpr *parse_json(void) {
+	PROFILE_FUNCTION_BEGIN;
+	JsonExpr *json = NULL;
 	if (is_token(TOKEN_LEFT_BRACE)) {
-		return parse_expr_dict();
+		json = parse_expr_dict();
 	} else if (is_token(TOKEN_LEFT_BRACKET)) {
-		return parse_expr_array();
+		json = parse_expr_array();
 	} else {
 		parse_error("expected '{' or '['");
-		return NULL;
 	}
+	PROFILE_FUNCTION_END;
+	return json;
 }
 
 HaversineInput parse_haversine_input(void) {
