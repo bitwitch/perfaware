@@ -1,3 +1,4 @@
-# 8086 CPU Simulator
+# 8086 Simulator
+The listings accompanying the course, like asm files to be assembled and executed by this simulator, can be found [here](https://github.com/cmuratori/computer_enhance/tree/main/perfaware/part1).  
 
-[nasm download](https://www.nasm.us/pub/nasm/releasebuilds/2.16.01/win64/nasm-2.16.01-installer-x64.exe) (version 2.16.01)
+The nasm assembler can be downloaded from [here](https://www.nasm.us/pub/nasm/releasebuilds/?C=M;O=D).  

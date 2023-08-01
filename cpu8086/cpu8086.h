@@ -1,6 +1,3 @@
-#define DISASSEM_BUF_SIZE       4096
-#define SINGLE_INST_BUF_SIZE    64
-#define OPERAND_BUF_SIZE        32
 #define MB                      1024*1024
 
 // NOTE(shaw): order is important for most of these regs, as they are used as indices
@@ -34,6 +31,10 @@ typedef enum {
 	OPERAND_REL_IMM,
 	OPERAND_REG,
 	OPERAND_MEM,
+	OPERAND_SEG_REG,
+
+	// only used for the instruction clocks table
+	OPERAND_ACC,
 } OperandKind;
 
 typedef struct {
@@ -109,12 +110,13 @@ typedef enum {
 	FIELD_SRC_IMM,
 	FIELD_REL_JMP,
 	FIELD_HAS_SEG_REG,
+	FIELD_CLOCKS,
 	FIELD_COUNT,
 } FieldKind;
 
 typedef struct {
 	FieldKind kind;
-	int num_bits;
+	int num_bits; // number of bits to read from the encoded instruction
 	uint8_t value;
 } Field;
 
@@ -122,6 +124,13 @@ typedef struct {
 	Operation op;
 	Field fields[16];
 } InstructionEncoding;
+
+typedef struct {
+	OperandKind dst;
+	OperandKind src;
+	int clocks;
+	bool add_ea_clocks;
+} InstructionClocksEntry;
 
 // these are masks for the corresponding bit in the flags register
 typedef enum {

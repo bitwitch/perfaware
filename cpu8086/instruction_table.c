@@ -189,3 +189,36 @@ InstructionEncoding instruction_table[] = {
 #undef SET_REG
 #undef IP_INC8
 #undef HAS_SR
+
+
+#define INSTRUCTION_CLOCKS_TABLE_MAX_LIST 16
+// table entry format: dest, source, clocks, add_ea_clocks
+InstructionClocksEntry instruction_clocks_table[][INSTRUCTION_CLOCKS_TABLE_MAX_LIST] = {
+	// TODO(shaw): some operand combinations are not filled out here like acc, imm
+	// this causes some listings like listing45 to fail. need to fill all this out
+	[OP_MOV] = {
+		{ OPERAND_MEM,     OPERAND_ACC,     10, false },
+		{ OPERAND_ACC,     OPERAND_MEM,     10, false },
+		{ OPERAND_REG,     OPERAND_REG,      2, false },
+		{ OPERAND_REG,     OPERAND_MEM,      8, true  },
+		{ OPERAND_MEM,     OPERAND_REG,      9, true  },
+		{ OPERAND_REG,     OPERAND_IMM,      4, false },
+		{ OPERAND_MEM,     OPERAND_IMM,     10, true  },
+		{ OPERAND_SEG_REG, OPERAND_REG,      2, false },
+		{ OPERAND_SEG_REG, OPERAND_MEM,      8, true  },
+		{ OPERAND_REG,     OPERAND_SEG_REG,  2, false },
+		{ OPERAND_MEM,     OPERAND_SEG_REG,  9, true  },
+	},
+	[OP_ADD] = {
+		{ OPERAND_REG,     OPERAND_REG,      3, false },
+		{ OPERAND_REG,     OPERAND_MEM,      9, true  },
+		{ OPERAND_MEM,     OPERAND_REG,     16, true  },
+		{ OPERAND_REG,     OPERAND_IMM,      4, false },
+		{ OPERAND_MEM,     OPERAND_IMM,     17, true  },
+		{ OPERAND_ACC,     OPERAND_IMM,      4, false },
+	},
+
+	// TODO(shaw): add clock counts for other instructions
+};
+
+

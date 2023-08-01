@@ -120,31 +120,6 @@ void dump_memory_to_file(void) {
 	fclose(fp);
 }
 
-
-// NOTE(shaw): this isn't great, it doesn't check if there is space in the buffer
-// it just writes. it can def be improved but but it works for now
-//
-// one of the great advantages of this is that we can write code like:
-// buf_printf(&buf_ptr, "mov %s, %s", operand_to_string(), operand_to_string());
-// and take advantage of format strings rather than having to manually keep
-// up with separators and shit like that
-// 
-// however it is wasteful of memory, because we end up allocating three times
-// in the above case, and two of them are redundant. keep in mind though that we 
-// are using the super fast arena allocator, so its not slow system allocations.
-//
-// maybe we should switch to just using fprintf, this will avoid redundant 
-// allocations, but then we have to do more manually string manupulation stuff
-// idk what is better yet...
-void buf_printf(char **buf, char *fmt, ...) {
-	va_list args;
-	va_start(args, fmt);
-	int count = vsprintf(*buf, fmt, args);
-	assert(count > 0);
-	va_end(args);
-	*buf += count;
-}
-
 Register reg_from_encoding(uint8_t encoding, bool wide) {
 	static Register reg_encoding_table[9][2] = {
 		{ { REG_A,  1, 0 }, { REG_A,  2, 0 } },
@@ -189,10 +164,7 @@ EffectiveAddress effective_address_from_encoding(uint8_t mode, uint8_t r_m, uint
 	return addr;
 }
 
-int instruction_count = 0; // JUST USED FOR DEBUGGING
 Instruction decode_instruction(void) {
-	++instruction_count;
-
 	uint8_t *stream = &memory[regs[REG_IP]];
 
 	Instruction inst = { 0 };
@@ -285,12 +257,19 @@ Instruction decode_instruction(void) {
 		uint16_t imm     = field_values[FIELD_DATA];
 
 		if (reg_mode) {
-			inst.operands[dir ? 0 : 1] = (Operand) { .kind = OPERAND_REG, .reg = reg_from_encoding(reg, inst.wide) };
-			inst.operands[dir ? 1 : 0] = (Operand) { .kind = OPERAND_REG, .reg = reg_from_encoding(r_m, inst.wide) };
+			Register r = reg_from_encoding(reg, inst.wide);
+			OperandKind kind = (r.index == REG_A) ? OPERAND_ACC : OPERAND_REG;
+			inst.operands[dir ? 0 : 1] = (Operand) { .kind = kind, .reg = r };
+
+			r = reg_from_encoding(r_m, inst.wide);
+			kind = (r.index == REG_A) ? OPERAND_ACC : OPERAND_REG;
+			inst.operands[dir ? 1 : 0] = (Operand) { .kind = kind, .reg = r };
 
 		} else {
 			// build register operand
-			inst.operands[dir ? 0 : 1] = (Operand) { .kind = OPERAND_REG, .reg = reg_from_encoding(reg, inst.wide) };
+			Register r = reg_from_encoding(reg, inst.wide);
+			OperandKind kind = (r.index == REG_A) ? OPERAND_ACC : OPERAND_REG;
+			inst.operands[dir ? 0 : 1] = (Operand) { .kind = kind, .reg = r };
 			// build memory operand
 			EffectiveAddress addr = effective_address_from_encoding(mode, r_m, disp);
 			inst.operands[dir ? 1 : 0] = (Operand) { .kind = OPERAND_MEM, .addr = addr };
@@ -304,7 +283,7 @@ Instruction decode_instruction(void) {
 		}
 
 		if (has_seg_reg) {
-			inst.operands[dir ? 0 : 1] = (Operand) { .kind = OPERAND_REG, .reg = seg_reg_from_encoding(sr) };
+			inst.operands[dir ? 0 : 1] = (Operand) { .kind = OPERAND_SEG_REG, .reg = seg_reg_from_encoding(sr) };
 		}
 
 		regs[REG_IP] += instruction_size;
@@ -379,12 +358,16 @@ void execute_op_byte(Operation op, uint8_t *dst, uint8_t val) {
 	
 }
 
+bool operand_is_reg(OperandKind kind) {
+	return kind == OPERAND_REG || kind == OPERAND_ACC || kind == OPERAND_SEG_REG;
+}
+
 void execute_instruction(Instruction *inst) {
 	Operand *operand_dst = &inst->operands[0];
 	Operand *operand_src = &inst->operands[1];
 	
 	uint16_t *dst;
-	if (operand_dst->kind == OPERAND_REG) {
+	if (operand_is_reg(operand_dst->kind)) {
 		Register reg = operand_dst->reg;
 		// NOTE(shaw): first cast to uint8_t* so that the offset only shifts the address by one byte
 		dst = (uint16_t*)((uint8_t*) &regs[reg.index] + reg.offset);
@@ -394,7 +377,7 @@ void execute_instruction(Instruction *inst) {
 	}
 
 	uint16_t src;
-	if (operand_src->kind == OPERAND_REG) {
+	if (operand_is_reg(operand_src->kind)) {
 		Register reg = operand_src->reg;
 		src = regs[reg.index] >> (8 * reg.offset);
 	} else if (operand_src->kind == OPERAND_MEM) {
@@ -414,34 +397,33 @@ void execute_instruction(Instruction *inst) {
 
 
 char *operand_to_string(Arena *arena, Operand *operand) {
-	if (operand->kind == OPERAND_REG)
+	if (operand_is_reg(operand->kind)) 
 		return reg_name(operand->reg);
 	
-	char *str = arena_alloc_zeroed(arena, OPERAND_BUF_SIZE);
-	char *buf_ptr = str;
+	BUF(char *operand_buf) = NULL;
 
 	switch (operand->kind) {
 	case OPERAND_IMM:
-		buf_printf(&buf_ptr, "%d", operand->imm);
+		buf_printf(operand_buf, "%d", operand->imm);
 		break;
 	case OPERAND_REL_IMM:
 		// HACK: this is assumming all OPERAND_REL_IMM are operands to conditional jumps
 		// and the +2 here is just because the nasm assembler uses a syntax where the immediate 
 		// offset is from the start of the instruction, whereas every other fucking thing is 
 		// relative to the end of the instruction
-		buf_printf(&buf_ptr, "$+%d", (int16_t)operand->imm + 2);
+		buf_printf(operand_buf, "$+%d", (int16_t)operand->imm + 2);
 		break;
 	case OPERAND_MEM: {
 		EffectiveAddress addr = operand->addr;
 		if (addr.is_direct) {
-			buf_printf(&buf_ptr, "[%d]", addr.imm_offset);
+			buf_printf(operand_buf, "[%d]", addr.imm_offset);
 		} else {
-			buf_printf(&buf_ptr, "[%s", reg_name(addr.reg_base));
+			buf_printf(operand_buf, "[%s", reg_name(addr.reg_base));
 			if (addr.has_reg_offset)
-				buf_printf(&buf_ptr, " + %s", reg_name(addr.reg_offset));
+				buf_printf(operand_buf, " + %s", reg_name(addr.reg_offset));
 			if (addr.imm_offset)
-				buf_printf(&buf_ptr, " + %d", addr.imm_offset);
-			buf_printf(&buf_ptr, "]");
+				buf_printf(operand_buf, " + %d", addr.imm_offset);
+			buf_printf(operand_buf, "]");
 		}
 		break;
 	}
@@ -450,9 +432,39 @@ char *operand_to_string(Arena *arena, Operand *operand) {
 		break;
 	}
 
-	return str;
+	return operand_buf;
 }
 
+int calculate_ea_clocks(EffectiveAddress *ea) {
+	if (ea->is_direct)
+		return 6;
+	if (!ea->has_reg_offset && !ea->imm_offset)
+		return 5;
+	if (!ea->has_reg_offset && ea->imm_offset)
+		return 9;
+	if (ea->has_reg_offset && !ea->imm_offset) {
+		if (ea->reg_base.index == REG_BP && ea->reg_offset.index == REG_DI ||
+			ea->reg_base.index == REG_B  && ea->reg_offset.index == REG_SI) 
+		{
+			return 7;
+		} 
+		else
+			return 8;
+	}
+
+	// if displacement + base + index
+	{
+		if (ea->reg_base.index == REG_BP && ea->reg_offset.index == REG_DI ||
+			ea->reg_base.index == REG_B  && ea->reg_offset.index == REG_SI)
+		{
+			return 11;
+		}
+		else
+			return 12;
+	}
+}
+
+int total_clocks;
 char *disassemble_instruction(Arena *arena, Instruction *inst) {
 	// NOTE: this is just here during development to point out where you need 
 	// to add code when adding ops
@@ -473,8 +485,7 @@ char *disassemble_instruction(Arena *arena, Instruction *inst) {
 	Operand *operand_dst = &inst->operands[0];
 	Operand *operand_src = &inst->operands[1];
 
-	char *asm_inst = arena_alloc_zeroed(arena, SINGLE_INST_BUF_SIZE);
-	char *buf_ptr = asm_inst;
+	BUF(char *asm_inst) = NULL;
 
 	char *dst = "";
 	char *sep = "";
@@ -490,7 +501,24 @@ char *disassemble_instruction(Arena *arena, Instruction *inst) {
 		size = inst->wide ? "word" : "byte";
 	}
 
-	buf_printf(&buf_ptr, "%s %s%s%s%s", mnemonics[inst->op], size, dst, sep, src);
+	int inst_clocks = 0;
+	for (int i=0; i<INSTRUCTION_CLOCKS_TABLE_MAX_LIST; ++i) {
+		InstructionClocksEntry entry = instruction_clocks_table[inst->op][i];
+		if (entry.dst == operand_dst->kind && entry.src == operand_src->kind) {
+			inst_clocks = entry.clocks;	
+			if (entry.add_ea_clocks) {
+				Operand *operand_mem = (operand_dst->kind == OPERAND_MEM) ? operand_dst : operand_src;
+				inst_clocks += calculate_ea_clocks(&operand_mem->addr);
+			}
+			break;
+		}
+	}
+
+	assert(inst_clocks > 0);
+	total_clocks += inst_clocks;
+
+	buf_printf(asm_inst, "%s %s%s%s%s ; clocks: +%d = %d", 
+		mnemonics[inst->op], size, dst, sep, src, inst_clocks, total_clocks);
 		
 	return asm_inst;
 }
@@ -515,47 +543,37 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	FILE *fp = fopen(file_path, "rb");
-	if (!fp) {
-		perror("fopen");
-		exit(1);
-	}
-
 	// TODO(shaw): read file directly into memory buffer to avoid the copy
 	char *file_data;
 	size_t file_size;
-	int rc = read_entire_file(fp, &file_data, &file_size);
-	if (rc != READ_ENTIRE_FILE_OK) {
+	bool ok = read_entire_file(file_path, &file_data, &file_size);
+	if (!ok) {
 		fprintf(stderr, "Failed to read file %s\n", argv[1]);
 		exit(1);
 	}
 	assert(file_size <= 1*MB);
 	memcpy(memory, file_data, file_size);
-	fclose(fp);
 
 	Arena string_arena = {0};
-	char buf[DISASSEM_BUF_SIZE];
-	char *buf_ptr = buf;
+	BUF(char *dasm_buf) = NULL;
 
-	buf_printf(&buf_ptr, "bits 16\n");
+	buf_printf(dasm_buf, "bits 16\n");
 
 	// disassemble 
 	while (regs[REG_IP] < file_size) {
 		Instruction inst = decode_instruction();
 		char *asm_inst = disassemble_instruction(&string_arena, &inst);
-		buf_printf(&buf_ptr, "%s\n", asm_inst);
+		buf_printf(dasm_buf, "%s\n", asm_inst);
 	}
 
-	*buf_ptr = 0;
-
-	fp = fopen("test.asm", "w");
+	FILE *fp = fopen("test.asm", "w");
 	if (!fp) {
 		perror("fopen");
 		exit(1);
 	}
 
-	size_t count = buf_ptr - buf;
-	if (fwrite(buf, 1, count, fp) < count) {
+	size_t count = buf_lenu(dasm_buf);
+	if (fwrite(dasm_buf, 1, count, fp) < count) {
 		perror("fwrite");
 		fclose(fp);
 		exit(1);
