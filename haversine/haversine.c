@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <math.h>
 
+#define PROFILE 1
 #include "../common.c"
 
 #define EARTH_RADIUS_KM 6372.8
@@ -505,4 +506,4 @@ int main(int argc, char **argv) {
 	return 0;
 }
 
-static_assert(ARRAY_COUNT(profile_blocks) > __COUNTER__, "Too many profile blocks");
+PROFILE_TRANSLATION_UNIT_END;

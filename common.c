@@ -204,14 +204,11 @@ typedef struct {
 	uint64_t ticks_inclusive; // with children
 } ProfileBlock;
 
-typedef struct {
-	char *name;
-	uint64_t start, stop;
-} ProfileTsPair;
-
 ProfileBlock profile_blocks[4096];
 uint64_t profile_start; 
 uint64_t current_profile_block_index;
+
+#ifdef PROFILE
 
 // NOTE(shaw): This macro is not guarded with typical do-while because it relies on 
 // variables declared inside it being accessible in the associated PROFILE_BLOCK_END.
@@ -239,6 +236,18 @@ uint64_t current_profile_block_index;
 
 #define PROFILE_FUNCTION_BEGIN PROFILE_BLOCK_BEGIN(__func__)
 #define PROFILE_FUNCTION_END PROFILE_BLOCK_END
+
+#define PROFILE_TRANSLATION_UNIT_END static_assert(ARRAY_COUNT(profile_blocks) > __COUNTER__, "Too many profile blocks")
+
+#else 
+
+#define PROFILE_BLOCK_BEGIN(...)
+#define PROFILE_BLOCK_END
+#define PROFILE_FUNCTION_BEGIN
+#define PROFILE_FUNCTION_END
+#define PROFILE_TRANSLATION_UNIT_END
+
+#endif // PROFILE
 
 void begin_profile(void) {
 	profile_start = read_cpu_timer();
