@@ -8,7 +8,7 @@
 
 #define EARTH_RADIUS_KM 6372.8
 
-typedef double f64;
+typedef double F64;
 
 void *xrealloc(void *ptr, size_t new_size) {
 	void *result = realloc(ptr, new_size);
@@ -19,14 +19,14 @@ void *xrealloc(void *ptr, size_t new_size) {
 	return result;
 }
 
-f64 lerp_f64(f64 min, f64 max, f64 t) {
+F64 lerp_f64(F64 min, F64 max, F64 t) {
 	return min + t * (max-min);
 }
 
 // returns a random float from min to max, both inclusive
-f64 random_f64(f64 min, f64 max) {
+F64 random_f64(F64 min, F64 max) {
 	assert(max - min <= RAND_MAX);
-	f64 normalized = rand() / (f64)RAND_MAX;
+	F64 normalized = rand() / (F64)RAND_MAX;
 	return lerp_f64(min, max, normalized);
 }
 
@@ -36,36 +36,36 @@ f64 random_f64(f64 min, f64 max) {
    ======================================================================== */
 
 
-static f64 square(f64 a) {
+static F64 square(F64 a) {
     return a*a;
 }
 
-static f64 radians_from_degrees(f64 degrees) {
+static F64 radians_from_degrees(F64 degrees) {
     return 0.01745329251994329577f * degrees;
 }
 
 // NOTE(casey): earth_radius is generally expected to be 6372.8
-static f64 reference_haversine(f64 x0, f64 y0, f64 x1, f64 y1, f64 earth_radius)
+static F64 reference_haversine(F64 x0, F64 y0, F64 x1, F64 y1, F64 earth_radius)
 {
     /* NOTE(casey): This is not meant to be a "good" way to calculate the Haversine distance.
        Instead, it attempts to follow, as closely as possible, the formula used in the real-world
        question on which these homework exercises are loosely based.
     */
     
-    f64 lat1 = y0;
-    f64 lat2 = y1;
-    f64 lon1 = x0;
-    f64 lon2 = x1;
+    F64 lat1 = y0;
+    F64 lat2 = y1;
+    F64 lon1 = x0;
+    F64 lon2 = x1;
     
-    f64 dLat = radians_from_degrees(lat2 - lat1);
-    f64 dLon = radians_from_degrees(lon2 - lon1);
+    F64 dLat = radians_from_degrees(lat2 - lat1);
+    F64 dLon = radians_from_degrees(lon2 - lon1);
     lat1 = radians_from_degrees(lat1);
     lat2 = radians_from_degrees(lat2);
     
-    f64 a = square(sin(dLat/2.0)) + cos(lat1)*cos(lat2)*square(sin(dLon/2));
-    f64 c = 2.0*asin(sqrt(a));
+    F64 a = square(sin(dLat/2.0)) + cos(lat1)*cos(lat2)*square(sin(dLon/2));
+    F64 c = 2.0*asin(sqrt(a));
     
-    f64 result = earth_radius * c;
+    F64 result = earth_radius * c;
     
     return result;
 }
@@ -73,7 +73,7 @@ static f64 reference_haversine(f64 x0, f64 y0, f64 x1, f64 y1, f64 earth_radius)
 
 // min is inclusive, max is exclusive
 typedef struct {
-	f64 x_min, x_max, y_min, y_max;
+	F64 x_min, x_max, y_min, y_max;
 } Cluster;
 
 typedef struct {
@@ -82,7 +82,7 @@ typedef struct {
 	int cap;
 } ClusterArray;
 
-Cluster cluster_create(f64 x_min, f64 x_max, f64 y_min, f64 y_max) {
+Cluster cluster_create(F64 x_min, F64 x_max, F64 y_min, F64 y_max) {
 	return (Cluster){ 
 		.x_min = x_min, .x_max = x_max, 
 		.y_min = y_min, .y_max = y_max
@@ -106,18 +106,18 @@ Cluster choose_cluster(ClusterArray clusters) {
 
 ClusterArray generate_clusters(void) {
 	ClusterArray result = {0};
-	f64 x = -180, y = -90;
+	F64 x = -180, y = -90;
 	enum {
 		max_x_divisions = 12,
 		max_y_divisions = 7,
 	};
 
 	// maximum step in x and y
-	f64 x_step = 60; 
-	f64 y_step = 60;
+	F64 x_step = 60; 
+	F64 y_step = 60;
 
 	// get x divisions
-	f64 x_divisions[max_x_divisions] = {-180};
+	F64 x_divisions[max_x_divisions] = {-180};
 	int x_division_count = 1;
 	for (; x_division_count < max_x_divisions-1; ++x_division_count) {
 		x += random_f64(1, x_step);
@@ -131,7 +131,7 @@ ClusterArray generate_clusters(void) {
 	}
 
 	// get y divisions
-	f64 y_divisions[max_y_divisions] = {-90};
+	F64 y_divisions[max_y_divisions] = {-90};
 	int y_division_count = 1;
 	for (; y_division_count < max_y_divisions-1; ++y_division_count) {
 		y += random_f64(1, y_step);
@@ -145,11 +145,11 @@ ClusterArray generate_clusters(void) {
 	}
 
 	for (int j = 0; j < y_division_count - 1; ++j) {
-		f64 y_min = y_divisions[j];
-		f64 y_max = y_divisions[j+1];
+		F64 y_min = y_divisions[j];
+		F64 y_max = y_divisions[j+1];
 		for (int i = 0; i < x_division_count - 1; ++i) {
-			f64 x_min = x_divisions[i];
-			f64 x_max = x_divisions[i+1];
+			F64 x_min = x_divisions[i];
+			F64 x_max = x_divisions[i+1];
 			cluster_append(&result, cluster_create(x_min, x_max, y_min, y_max));
 		}
 	}
@@ -198,11 +198,11 @@ int main(int argc, char **argv) {
 
 	fprintf(json_file, "{\"pairs\":[\n");
 
-	f64 sum = 0;
+	F64 sum = 0;
 
 	// generate pairs
 	for (int i=0; i<num_pairs; ++i) {
-		f64 x0, y0, x1, y1;
+		F64 x0, y0, x1, y1;
 		if (cluster_mode) {
 			Cluster cluster = choose_cluster(clusters);
 			x0 = random_f64(cluster.x_min, cluster.x_max);
@@ -216,7 +216,7 @@ int main(int argc, char **argv) {
 			y1 = random_f64(-90, 90);
 		}
 
-		f64 reference_result = reference_haversine(x0, y0, x1, y1, EARTH_RADIUS_KM);
+		F64 reference_result = reference_haversine(x0, y0, x1, y1, EARTH_RADIUS_KM);
 		sum += reference_result;
 
 		// write computed distance to comp_file
@@ -228,7 +228,7 @@ int main(int argc, char **argv) {
 	}
 
 	assert(num_pairs > 0);
-	f64 average = sum / num_pairs;
+	F64 average = sum / num_pairs;
 
 	// write average to comp_file
 	fwrite(&average, sizeof(average), 1, comp_file);

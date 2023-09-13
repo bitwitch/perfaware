@@ -12,7 +12,7 @@
 
 #define EARTH_RADIUS_KM 6372.8
 
-typedef double f64;
+typedef double F64;
 
 /*
 
@@ -44,7 +44,7 @@ typedef enum {
 typedef struct {
 	TokenKind kind;
 	char *str_val;
-	f64 float_val;
+	F64 float_val;
 } Token;
 
 typedef enum {
@@ -78,12 +78,12 @@ struct JsonExpr {
 		JsonDict dict;
 		JsonArray array;
 		char *str_val;
-		f64 float_val;
+		F64 float_val;
 	};
 };
 
 typedef struct {
-	f64 x0, y0, x1, y1;
+	F64 x0, y0, x1, y1;
 } Pair;
 
 typedef struct {
@@ -129,7 +129,7 @@ JsonExpr *expr_string(char *str) {
 	return expr;
 }
 
-JsonExpr *expr_float(f64 val) {
+JsonExpr *expr_float(F64 val) {
 	JsonExpr *expr = xmalloc(sizeof(JsonExpr));
 	expr->kind = EXPR_FLOAT;
 	expr->float_val = val;
@@ -202,7 +202,7 @@ void scan_float(void) {
         ++stream;
     while (isdigit(*stream))
         ++stream;
-    f64 val = strtod(start, NULL);
+    F64 val = strtod(start, NULL);
     if (val == HUGE_VAL || val == -HUGE_VAL)
         parse_error("Float literal overflow");
     token.kind = TOKEN_FLOAT;
@@ -371,36 +371,36 @@ HaversineInput parse_haversine_input(void) {
 //------------------------------------------------------------------------------
 // from LISTING 65 - Reference Haversine Distance Formula
 //------------------------------------------------------------------------------
-static f64 square(f64 a) {
+static F64 square(F64 a) {
     return a*a;
 }
 
-static f64 radians_from_degrees(f64 degrees) {
+static F64 radians_from_degrees(F64 degrees) {
     return 0.01745329251994329577f * degrees;
 }
 
 // NOTE(casey): earth_radius is generally expected to be 6372.8
-static f64 reference_haversine(f64 x0, f64 y0, f64 x1, f64 y1, f64 earth_radius)
+static F64 reference_haversine(F64 x0, F64 y0, F64 x1, F64 y1, F64 earth_radius)
 {
     /* NOTE(casey): This is not meant to be a "good" way to calculate the Haversine distance.
        Instead, it attempts to follow, as closely as possible, the formula used in the real-world
        question on which these homework exercises are loosely based.
     */
     
-    f64 lat1 = y0;
-    f64 lat2 = y1;
-    f64 lon1 = x0;
-    f64 lon2 = x1;
+    F64 lat1 = y0;
+    F64 lat2 = y1;
+    F64 lon1 = x0;
+    F64 lon2 = x1;
     
-    f64 dLat = radians_from_degrees(lat2 - lat1);
-    f64 dLon = radians_from_degrees(lon2 - lon1);
+    F64 dLat = radians_from_degrees(lat2 - lat1);
+    F64 dLon = radians_from_degrees(lon2 - lon1);
     lat1 = radians_from_degrees(lat1);
     lat2 = radians_from_degrees(lat2);
     
-    f64 a = square(sin(dLat/2.0)) + cos(lat1)*cos(lat2)*square(sin(dLon/2));
-    f64 c = 2.0*asin(sqrt(a));
+    F64 a = square(sin(dLat/2.0)) + cos(lat1)*cos(lat2)*square(sin(dLon/2));
+    F64 c = 2.0*asin(sqrt(a));
     
-    f64 result = earth_radius * c;
+    F64 result = earth_radius * c;
     
     return result;
 }
@@ -421,22 +421,22 @@ void validate(char *answers_filepath, HaversineInput input) {
 
 	BUF(char *failures) = NULL;
 
-	f64 *distances = (f64*)file_data;
-	f64 sum = 0;
+	F64 *distances = (F64*)file_data;
+	F64 sum = 0;
 	for (size_t i=0; i<input.num_pairs; ++i) {
 		Pair pair = input.pairs[i];
-		f64 distance = reference_haversine(pair.x0, pair.y0, pair.x1, pair.y1, EARTH_RADIUS_KM);
+		F64 distance = reference_haversine(pair.x0, pair.y0, pair.x1, pair.y1, EARTH_RADIUS_KM);
 		sum += distance;
-		f64 error = distance - distances[i];
+		F64 error = distance - distances[i];
 		if (error > EPSILON) {
 			buf_printf(failures, "pair %zu: expected %.16f, got %.16f, difference %.16f\n", 
 				i, distances[i], distance, error);
 		}
 	}
-	f64 average = input.num_pairs > 0 ? sum / input.num_pairs : 0;
-	f64 generated_average = distances[input.num_pairs];
+	F64 average = input.num_pairs > 0 ? sum / input.num_pairs : 0;
+	F64 generated_average = distances[input.num_pairs];
 
-	f64 difference = 0;
+	F64 difference = 0;
 	if (generated_average > 0) {
 		difference = average - generated_average;
 	}
@@ -463,7 +463,6 @@ int main(int argc, char **argv) {
 		printf("       %s [haversine_input.json] [answers.f64]\n", argv[0]);
 		exit(1);
 	}
-
 	char *input_filepath = argv[1];
 	char *answers_filepath = argc > 2 ? argv[2] : NULL;
 
@@ -486,18 +485,18 @@ int main(int argc, char **argv) {
 	} else {
 		PROFILE_BLOCK_BEGIN("compute haversine");
 
-		f64 sum = 0;
+		F64 sum = 0;
 		for (int i=0; i<input.num_pairs; ++i) {
 			Pair pair = input.pairs[i];
-			f64 distance = reference_haversine(pair.x0, pair.y0, pair.x1, pair.y1, EARTH_RADIUS_KM);
+			F64 distance = reference_haversine(pair.x0, pair.y0, pair.x1, pair.y1, EARTH_RADIUS_KM);
 			sum += distance;
 		}
-		f64 average = input.num_pairs > 0 ? sum / input.num_pairs : 0;
+		F64 average = input.num_pairs > 0 ? sum / input.num_pairs : 0;
 
 		printf("Number of pairs: %zu\n", input.num_pairs);
 		printf("Average haversine distance: %.16f\n", average);
 
-		PROFILE_BLOCK_END("compute haversine");
+		PROFILE_BLOCK_END;
 	}
 
 	end_profile();
