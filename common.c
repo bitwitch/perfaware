@@ -200,9 +200,8 @@ uint64_t estimate_cpu_freq(void) {
 typedef struct {
 	char *name;
 	int count;
-	uint64_t total_elapsed;
-	uint64_t children_elapsed;
-	uint64_t root_elapsed; // includes only top level calls, used for recursive profile blocks
+	uint64_t ticks_exclusive; // without children
+	uint64_t ticks_inclusive; // with children
 } ProfileBlock;
 
 typedef struct {
@@ -225,16 +224,16 @@ uint64_t current_profile_block_index;
 	uint64_t __parent_index = current_profile_block_index; \
 	current_profile_block_index = __block_index; \
 	ProfileBlock *__block = &profile_blocks[__block_index]; \
-	uint64_t __top_level_sum = __block->root_elapsed; \
+	uint64_t __top_level_sum = __block->ticks_inclusive; \
 	uint64_t __block_start = read_cpu_timer();
 
 #define PROFILE_BLOCK_END do { \
 	uint64_t elapsed = read_cpu_timer() - __block_start; \
 	__block->name = __block_name; \
 	++__block->count; \
-	__block->total_elapsed += elapsed; \
-	__block->root_elapsed = __top_level_sum + elapsed; \
-	profile_blocks[__parent_index].children_elapsed += elapsed; \
+	__block->ticks_inclusive = __top_level_sum + elapsed; \
+	__block->ticks_exclusive += elapsed; \
+	profile_blocks[__parent_index].ticks_exclusive -= elapsed; \
 	current_profile_block_index = __parent_index; \
 } while(0)
 
@@ -256,17 +255,15 @@ void end_profile(void) {
 
 	for (int i=0; i<ARRAY_COUNT(profile_blocks); ++i) {
 		ProfileBlock block = profile_blocks[i];
-		if (!block.total_elapsed) continue;
+		if (!block.ticks_inclusive) continue;
 
-		assert(block.total_elapsed >= block.children_elapsed);
-		uint64_t exclusive_ticks = block.total_elapsed - block.children_elapsed;
-		double exclusive_pct = 100 * (exclusive_ticks / (double)total_ticks);
+		double pct_exclusive = 100 * (block.ticks_exclusive / (double)total_ticks);
 		printf("\t%s[%d]: exclusive %.2f%%, %llu ticks",
-				block.name, block.count, exclusive_pct, exclusive_ticks);
+				block.name, block.count, pct_exclusive, block.ticks_exclusive);
 
-		if (block.root_elapsed != exclusive_ticks) {
-			double pct = 100 * (block.root_elapsed / (double)total_ticks);
-			printf(" | inclusive %.2f%%, %llu ticks", pct, block.root_elapsed);
+		if (block.ticks_exclusive != block.ticks_inclusive) {
+			double pct_inclusive = 100 * (block.ticks_inclusive / (double)total_ticks);
+			printf(" | inclusive %.2f%%, %llu ticks", pct_inclusive, block.ticks_inclusive);
 		} 
 
 		printf("\n");
