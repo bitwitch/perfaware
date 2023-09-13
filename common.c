@@ -200,79 +200,49 @@ uint64_t estimate_cpu_freq(void) {
 typedef struct {
 	char *name;
 	int count;
-	int recursion_depth;
 	uint64_t total_elapsed;
 	uint64_t children_elapsed;
-} ProfileBlockInfo;
+	uint64_t root_elapsed; // includes only top level calls, used for recursive profile blocks
+} ProfileBlock;
 
 typedef struct {
 	char *name;
 	uint64_t start, stop;
 } ProfileTsPair;
 
-BUF(ProfileBlockInfo *profile_info);
+ProfileBlock profile_blocks[4096];
 uint64_t profile_start; 
 uint64_t current_profile_block_index;
 
-// FIXME(shaw): all of these linear searches in the profiling utility are going to scale really poorly
-// and be slow af. they are just used to prove out a concept quickly.
-void enter_profile_block(char *name) {
-	// NOTE(shaw): i=1, first entry is sentinal so skip it
-	for (int i=1; i<buf_len(profile_info); ++i) {
-		ProfileBlockInfo *info = &profile_info[i];
-		if (strcmp(info->name, name) == 0) {
-			current_profile_block_index = i;
-			++info->count;
-			++info->recursion_depth;
-			return;
-		}
-	}
-	// not found, create new entry
-	buf_push(profile_info, (ProfileBlockInfo){.name=name, .count=1, .recursion_depth=1});
-	current_profile_block_index = buf_len(profile_info) - 1;
-}
-
-void leave_profile_block(char *name, uint64_t parent_index, uint64_t elapsed) {
-	// NOTE(shaw): first entry is sentinal so skip it
-	for (int i=1; i<buf_len(profile_info); ++i) {
-		ProfileBlockInfo *info = &profile_info[i];
-		if (strcmp(info->name, name) == 0) {
-			if (parent_index && parent_index != i) {
-				profile_info[parent_index].children_elapsed += elapsed;
-			}
-			if (info->recursion_depth == 1) {
-				info->total_elapsed += elapsed;
-			}
-			current_profile_block_index = parent_index;
-			--info->recursion_depth;
-			return;
-		}
-	}
-	// couldn't find function with name in profile_info, should never happen
-	assert(0);
-}
-
-
-// NOTE(shaw): this macro is not guarded with typical do-while because it relies on 
-// variables declared inside it being accessible in the associated PROFILE_BLOCK_END
+// NOTE(shaw): This macro is not guarded with typical do-while because it relies on 
+// variables declared inside it being accessible in the associated PROFILE_BLOCK_END.
+// This means that you cannot have nested profile blocks in the same scope.
+// However, in most cases you either already have separate scopes, or you
+// should trivially be able to open a new scope {}.
 #define PROFILE_BLOCK_BEGIN(block_name) \
+	char *__block_name = block_name; \
+	uint64_t __block_index = __COUNTER__ + 1; \
 	uint64_t __parent_index = current_profile_block_index; \
-	enter_profile_block(block_name); \
+	current_profile_block_index = __block_index; \
+	ProfileBlock *__block = &profile_blocks[__block_index]; \
+	uint64_t __top_level_sum = __block->root_elapsed; \
 	uint64_t __block_start = read_cpu_timer();
 
-#define PROFILE_BLOCK_END(block_name) do { \
+#define PROFILE_BLOCK_END do { \
 	uint64_t elapsed = read_cpu_timer() - __block_start; \
-	leave_profile_block(block_name, __parent_index, elapsed); \
+	__block->name = __block_name; \
+	++__block->count; \
+	__block->total_elapsed += elapsed; \
+	__block->root_elapsed = __top_level_sum + elapsed; \
+	profile_blocks[__parent_index].children_elapsed += elapsed; \
+	current_profile_block_index = __parent_index; \
 } while(0)
 
 #define PROFILE_FUNCTION_BEGIN PROFILE_BLOCK_BEGIN(__func__)
-#define PROFILE_FUNCTION_END PROFILE_BLOCK_END(__func__)
+#define PROFILE_FUNCTION_END PROFILE_BLOCK_END
 
 void begin_profile(void) {
 	profile_start = read_cpu_timer();
-	// put an empty sentinal entry into profile_info
-	assert(buf_len(profile_info) == 0);
-	buf_push(profile_info, (ProfileBlockInfo){0});
 }
 
 void end_profile(void) {
@@ -284,22 +254,25 @@ void end_profile(void) {
 
 	printf("\nTotal time: %f ms %llu ticks (cpu freq %llu)\n", total_ms, total_ticks, cpu_freq);
 
-	// NOTE(shaw): first entry is sentinal so skip it
-	for (int i=1; i<buf_len(profile_info); ++i) {
-		ProfileBlockInfo info = profile_info[i];
-		double pct = 100 * (info.total_elapsed / (double)total_ticks);
+	for (int i=0; i<ARRAY_COUNT(profile_blocks); ++i) {
+		ProfileBlock block = profile_blocks[i];
+		if (!block.total_elapsed) continue;
 
-		if (info.children_elapsed) {
-			uint64_t exclusive_ticks = info.total_elapsed - info.children_elapsed;
-			double exclusive_pct = 100 * (exclusive_ticks/ (double)total_ticks);
-			printf("\t%s[%d]: %llu, %llu w/ children (%.2f%%, %.2f%% w/ children)\n", info.name, info.count, info.total_elapsed, exclusive_ticks, exclusive_pct, pct);
-		} else {
-			printf("\t%s[%d]: %llu (%.2f%%)\n", info.name, info.count, info.total_elapsed, pct);
-		}
+		assert(block.total_elapsed >= block.children_elapsed);
+		uint64_t exclusive_ticks = block.total_elapsed - block.children_elapsed;
+		double exclusive_pct = 100 * (exclusive_ticks / (double)total_ticks);
+		printf("\t%s[%d]: exclusive %.2f%%, %llu ticks",
+				block.name, block.count, exclusive_pct, exclusive_ticks);
 
+		if (block.root_elapsed != exclusive_ticks) {
+			double pct = 100 * (block.root_elapsed / (double)total_ticks);
+			printf(" | inclusive %.2f%%, %llu ticks", pct, block.root_elapsed);
+		} 
+
+		printf("\n");
 	}
 }
-	
+
 // ---------------------------------------------------------------------------
 // OS Specific Functions
 // ---------------------------------------------------------------------------

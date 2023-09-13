@@ -1,4 +1,5 @@
 #include <intrin.h>
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 uint64_t os_timer_freq(void) {
@@ -14,8 +15,6 @@ uint64_t os_read_timer(void) {
 }
 
 bool read_entire_file(char *filepath, char **file_data, size_t *out_size) {
-	PROFILE_FUNCTION_BEGIN;
-
 	FILE *f = fopen(filepath, "rb");
 	if (!f) {
 		return false;
@@ -42,6 +41,5 @@ bool read_entire_file(char *filepath, char **file_data, size_t *out_size) {
 	(*file_data)[bytes_read] = 0; // add null terminator
 	fclose(f);
 
-	PROFILE_FUNCTION_END;
 	return true;
 }

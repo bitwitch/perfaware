@@ -405,9 +405,6 @@ static F64 reference_haversine(F64 x0, F64 y0, F64 x1, F64 y1, F64 earth_radius)
     return result;
 }
 
-//------------------------------------------------------------------------------
-// Entry Point
-//------------------------------------------------------------------------------
 #define EPSILON 0.00000000001
 void validate(char *answers_filepath, HaversineInput input) {
 	PROFILE_FUNCTION_BEGIN;
@@ -454,6 +451,9 @@ void validate(char *answers_filepath, HaversineInput input) {
 }
 #undef EPSILON
 
+//------------------------------------------------------------------------------
+// Entry Point
+//------------------------------------------------------------------------------
 int main(int argc, char **argv) {
 	begin_profile();
 
@@ -467,6 +467,7 @@ int main(int argc, char **argv) {
 	char *answers_filepath = argc > 2 ? argv[2] : NULL;
 
 	// reading json input file
+	PROFILE_BLOCK_BEGIN("reading json input file");
 	char *file_data;
 	size_t file_size;
 	bool ok = read_entire_file(input_filepath, &file_data, &file_size);
@@ -474,6 +475,7 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "error: failed to read file %s\n", input_filepath);
 		exit(1);
 	}
+	PROFILE_BLOCK_END;
 
 	// parsing json
 	init_parse(file_data);
@@ -503,3 +505,4 @@ int main(int argc, char **argv) {
 	return 0;
 }
 
+static_assert(ARRAY_COUNT(profile_blocks) > __COUNTER__, "Too many profile blocks");
