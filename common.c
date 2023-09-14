@@ -199,9 +199,10 @@ uint64_t estimate_cpu_freq(void) {
 
 typedef struct {
 	char *name;
-	int count;
+	uint64_t count;
 	uint64_t ticks_exclusive; // without children
 	uint64_t ticks_inclusive; // with children
+	uint64_t processed_byte_count;
 } ProfileBlock;
 
 ProfileBlock profile_blocks[4096];
@@ -218,24 +219,26 @@ uint64_t current_profile_block_index;
 #define PROFILE_BLOCK_BEGIN(block_name) \
 	char *__block_name = block_name; \
 	uint64_t __block_index = __COUNTER__ + 1; \
-	uint64_t __parent_index = current_profile_block_index; \
-	current_profile_block_index = __block_index; \
 	ProfileBlock *__block = &profile_blocks[__block_index]; \
 	uint64_t __top_level_sum = __block->ticks_inclusive; \
-	uint64_t __block_start = read_cpu_timer();
+	uint64_t __parent_index = current_profile_block_index; \
+	current_profile_block_index = __block_index; \
+	uint64_t __block_start = read_cpu_timer(); \
 
-#define PROFILE_BLOCK_END do { \
+#define PROFILE_BLOCK_END_THROUGHPUT(byte_count) do { \
 	uint64_t elapsed = read_cpu_timer() - __block_start; \
 	__block->name = __block_name; \
 	++__block->count; \
 	__block->ticks_inclusive = __top_level_sum + elapsed; \
 	__block->ticks_exclusive += elapsed; \
+	__block->processed_byte_count += byte_count; \
 	profile_blocks[__parent_index].ticks_exclusive -= elapsed; \
 	current_profile_block_index = __parent_index; \
 } while(0)
 
+#define PROFILE_BLOCK_END      PROFILE_BLOCK_END_THROUGHPUT(0)
 #define PROFILE_FUNCTION_BEGIN PROFILE_BLOCK_BEGIN(__func__)
-#define PROFILE_FUNCTION_END PROFILE_BLOCK_END
+#define PROFILE_FUNCTION_END   PROFILE_BLOCK_END
 
 #define PROFILE_TRANSLATION_UNIT_END static_assert(ARRAY_COUNT(profile_blocks) > __COUNTER__, "Too many profile blocks")
 
@@ -267,13 +270,20 @@ void end_profile(void) {
 		if (!block.ticks_inclusive) continue;
 
 		double pct_exclusive = 100 * (block.ticks_exclusive / (double)total_ticks);
-		printf("\t%s[%d]: exclusive %.2f%%, %llu ticks",
-				block.name, block.count, pct_exclusive, block.ticks_exclusive);
+		printf("\t%s[%llu]: %llu (%.2f%%", block.name, block.count, block.ticks_exclusive, pct_exclusive);
 
 		if (block.ticks_exclusive != block.ticks_inclusive) {
 			double pct_inclusive = 100 * (block.ticks_inclusive / (double)total_ticks);
-			printf(" | inclusive %.2f%%, %llu ticks", pct_inclusive, block.ticks_inclusive);
+			printf(", %.2f%% w/children", pct_inclusive);
 		} 
+
+		printf(")");
+
+		if (block.processed_byte_count) {
+			double megabytes = block.processed_byte_count / (double)(1024*1024);
+			double gigabytes_per_second = (megabytes / 1024) / (block.ticks_inclusive / (double)cpu_freq);
+			printf(" %.3fmb at %.2fgb/s", megabytes, gigabytes_per_second);
+		}
 
 		printf("\n");
 	}

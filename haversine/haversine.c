@@ -476,7 +476,7 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "error: failed to read file %s\n", input_filepath);
 		exit(1);
 	}
-	PROFILE_BLOCK_END;
+	PROFILE_BLOCK_END_THROUGHPUT(file_size);
 
 	// parsing json
 	init_parse(file_data);
@@ -499,7 +499,7 @@ int main(int argc, char **argv) {
 		printf("Number of pairs: %zu\n", input.num_pairs);
 		printf("Average haversine distance: %.16f\n", average);
 
-		PROFILE_BLOCK_END;
+		PROFILE_BLOCK_END_THROUGHPUT(input.num_pairs * sizeof(*input.pairs));
 	}
 
 	end_profile();
