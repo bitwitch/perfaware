@@ -18,7 +18,7 @@ typedef double F64;
 /*
 
 json: dict
-      array
+	  array
 
 expr: dict
 	  array
@@ -194,20 +194,20 @@ void scan_str(void) {
 }
 
 void scan_float(void) {
-    char *start = stream;
+	char *start = stream;
 	if (*stream == '-')
-        ++stream;
-    while (isdigit(*stream))
-        ++stream;
-    if (*stream == '.')
-        ++stream;
-    while (isdigit(*stream))
-        ++stream;
-    F64 val = strtod(start, NULL);
-    if (val == HUGE_VAL || val == -HUGE_VAL)
-        parse_error("Float literal overflow");
-    token.kind = TOKEN_FLOAT;
-    token.float_val = val;
+		++stream;
+	while (isdigit(*stream))
+		++stream;
+	if (*stream == '.')
+		++stream;
+	while (isdigit(*stream))
+		++stream;
+	F64 val = strtod(start, NULL);
+	if (val == HUGE_VAL || val == -HUGE_VAL)
+		parse_error("Float literal overflow");
+	token.kind = TOKEN_FLOAT;
+	token.float_val = val;
 }
 
 void next_token(void) {
@@ -373,37 +373,37 @@ HaversineInput parse_haversine_input(void) {
 // from LISTING 65 - Reference Haversine Distance Formula
 //------------------------------------------------------------------------------
 static F64 square(F64 a) {
-    return a*a;
+	return a*a;
 }
 
 static F64 radians_from_degrees(F64 degrees) {
-    return 0.01745329251994329577f * degrees;
+	return 0.01745329251994329577f * degrees;
 }
 
 // NOTE(casey): earth_radius is generally expected to be 6372.8
 static F64 reference_haversine(F64 x0, F64 y0, F64 x1, F64 y1, F64 earth_radius)
 {
-    /* NOTE(casey): This is not meant to be a "good" way to calculate the Haversine distance.
-       Instead, it attempts to follow, as closely as possible, the formula used in the real-world
-       question on which these homework exercises are loosely based.
-    */
-    
-    F64 lat1 = y0;
-    F64 lat2 = y1;
-    F64 lon1 = x0;
-    F64 lon2 = x1;
-    
-    F64 dLat = radians_from_degrees(lat2 - lat1);
-    F64 dLon = radians_from_degrees(lon2 - lon1);
-    lat1 = radians_from_degrees(lat1);
-    lat2 = radians_from_degrees(lat2);
-    
-    F64 a = square(sin(dLat/2.0)) + cos(lat1)*cos(lat2)*square(sin(dLon/2));
-    F64 c = 2.0*asin(sqrt(a));
-    
-    F64 result = earth_radius * c;
-    
-    return result;
+	/* NOTE(casey): This is not meant to be a "good" way to calculate the Haversine distance.
+	   Instead, it attempts to follow, as closely as possible, the formula used in the real-world
+	   question on which these homework exercises are loosely based.
+	*/
+	
+	F64 lat1 = y0;
+	F64 lat2 = y1;
+	F64 lon1 = x0;
+	F64 lon2 = x1;
+	
+	F64 dLat = radians_from_degrees(lat2 - lat1);
+	F64 dLon = radians_from_degrees(lon2 - lon1);
+	lat1 = radians_from_degrees(lat1);
+	lat2 = radians_from_degrees(lat2);
+	
+	F64 a = square(sin(dLat/2.0)) + cos(lat1)*cos(lat2)*square(sin(dLon/2));
+	F64 c = 2.0*asin(sqrt(a));
+	
+	F64 result = earth_radius * c;
+	
+	return result;
 }
 
 #define EPSILON 0.00000000001
