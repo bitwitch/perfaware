@@ -68,6 +68,34 @@ char *chop_by_delimiter(char **str, char *delimiter) {
     return chopped;
 }
 
+bool read_entire_file(char *filepath, char **file_data, size_t *out_size) {
+	FILE *f = fopen(filepath, "rb");
+	if (!f) {
+		return false;
+	}
+
+	uint64_t file_size = os_file_size(filepath);
+
+	*out_size = file_size + 1;
+	*file_data = malloc(*out_size);
+	if (!*file_data) {
+		fclose(f);
+		return false;
+	}
+
+	size_t bytes_read = fread(*file_data, 1, file_size, f);
+	if (bytes_read < file_size && !feof(f)) {
+		fclose(f);
+		return false;
+	}
+
+	(*file_data)[bytes_read] = 0; // add null terminator
+	fclose(f);
+
+	return true;
+}
+
+
 
 // ---------------------------------------------------------------------------
 // stretchy buffer, a la sean barrett
