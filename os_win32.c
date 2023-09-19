@@ -1,22 +1,49 @@
 #include <intrin.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <psapi.h>
 
-uint64_t os_timer_freq(void) {
+typedef struct {
+	bool initialized;
+	HANDLE process_handle;
+} OS_Metrics;
+
+OS_Metrics global_metrics;
+
+void os_metrics_init(void) {
+	if (!global_metrics.initialized) {
+		global_metrics.initialized = true;
+		global_metrics.process_handle = OpenProcess(
+			PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 
+			FALSE, 
+			GetCurrentProcessId());
+	}
+}
+
+U64 os_timer_freq(void) {
 	LARGE_INTEGER Freq;
 	QueryPerformanceFrequency(&Freq);
 	return Freq.QuadPart;
 }
 
-uint64_t os_read_timer(void) {
+U64 os_read_timer(void) {
 	LARGE_INTEGER Value;
 	QueryPerformanceCounter(&Value);
 	return Value.QuadPart;
 }
 
-uint64_t os_file_size(char *filepath) {
+U64 os_file_size(char *filepath) {
 	struct __stat64 stat = {0};
 	_stat64(filepath, &stat);
 	return stat.st_size;
+}
+
+U64 os_process_page_fault_count(void) {
+	PROCESS_MEMORY_COUNTERS_EX counters = {0};
+	if (!GetProcessMemoryInfo(global_metrics.process_handle, (PROCESS_MEMORY_COUNTERS*)&counters, sizeof(counters))) {
+		fprintf(stderr, "Error: failed to read process page fault count");
+		return 0;
+	}
+	return counters.PageFaultCount;
 }
 

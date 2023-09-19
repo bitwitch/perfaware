@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -7,11 +8,26 @@
 #include <stdarg.h>
 #include <assert.h>
 #include <sys/stat.h>
+
+typedef uint8_t  U8;
+typedef uint16_t U16;
+typedef uint32_t U32;
+typedef uint64_t U64;
+
+typedef int8_t  S8;
+typedef int16_t S16;
+typedef int32_t S32;
+typedef int64_t S64;
+
+typedef float  F32;
+typedef double F64;
+
 #include "os.h"
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
 #define ARRAY_COUNT(a) sizeof(a)/sizeof(*(a))
+
 
 // ---------------------------------------------------------------------------
 // Helper Utilities
@@ -74,7 +90,7 @@ bool read_entire_file(char *filepath, char **file_data, size_t *out_size) {
 		return false;
 	}
 
-	uint64_t file_size = os_file_size(filepath);
+	U64 file_size = os_file_size(filepath);
 
 	*out_size = file_size + 1;
 	*file_data = malloc(*out_size);
@@ -204,38 +220,38 @@ void arena_free(Arena *arena) {
 // ---------------------------------------------------------------------------
 // Timers and Profiling
 // ---------------------------------------------------------------------------
-uint64_t read_cpu_timer(void) {
+U64 read_cpu_timer(void) {
 	return __rdtsc();
 }
 
-uint64_t estimate_cpu_freq(void) {
-	uint64_t wait_time_ms = 100;
-	uint64_t os_freq = os_timer_freq();
-	uint64_t os_ticks_during_wait_time = os_freq * wait_time_ms / 1000;
-	uint64_t os_elapsed = 0;
-	uint64_t os_start = os_read_timer();
-	uint64_t cpu_start = read_cpu_timer();
+U64 estimate_cpu_freq(void) {
+	U64 wait_time_ms = 100;
+	U64 os_freq = os_timer_freq();
+	U64 os_ticks_during_wait_time = os_freq * wait_time_ms / 1000;
+	U64 os_elapsed = 0;
+	U64 os_start = os_read_timer();
+	U64 cpu_start = read_cpu_timer();
 
 	while (os_elapsed < os_ticks_during_wait_time) {
 		os_elapsed = os_read_timer() - os_start;
 	}
 
-	uint64_t cpu_freq = (read_cpu_timer() - cpu_start) * os_freq / os_elapsed;
+	U64 cpu_freq = (read_cpu_timer() - cpu_start) * os_freq / os_elapsed;
 
 	return cpu_freq;
 }
 
 typedef struct {
 	char *name;
-	uint64_t count;
-	uint64_t ticks_exclusive; // without children
-	uint64_t ticks_inclusive; // with children
-	uint64_t processed_byte_count;
+	U64 count;
+	U64 ticks_exclusive; // without children
+	U64 ticks_inclusive; // with children
+	U64 processed_byte_count;
 } ProfileBlock;
 
 ProfileBlock profile_blocks[4096];
-uint64_t profile_start; 
-uint64_t current_profile_block_index;
+U64 profile_start; 
+U64 current_profile_block_index;
 
 #ifdef PROFILE
 
@@ -246,15 +262,15 @@ uint64_t current_profile_block_index;
 // should trivially be able to open a new scope {}.
 #define PROFILE_BLOCK_BEGIN(block_name) \
 	char *__block_name = block_name; \
-	uint64_t __block_index = __COUNTER__ + 1; \
+	U64 __block_index = __COUNTER__ + 1; \
 	ProfileBlock *__block = &profile_blocks[__block_index]; \
-	uint64_t __top_level_sum = __block->ticks_inclusive; \
-	uint64_t __parent_index = current_profile_block_index; \
+	U64 __top_level_sum = __block->ticks_inclusive; \
+	U64 __parent_index = current_profile_block_index; \
 	current_profile_block_index = __block_index; \
-	uint64_t __block_start = read_cpu_timer(); \
+	U64 __block_start = read_cpu_timer(); \
 
 #define PROFILE_BLOCK_END_THROUGHPUT(byte_count) do { \
-	uint64_t elapsed = read_cpu_timer() - __block_start; \
+	U64 elapsed = read_cpu_timer() - __block_start; \
 	__block->name = __block_name; \
 	++__block->count; \
 	__block->ticks_inclusive = __top_level_sum + elapsed; \
@@ -285,11 +301,11 @@ void begin_profile(void) {
 }
 
 void end_profile(void) {
-	uint64_t total_ticks = read_cpu_timer() - profile_start;
+	U64 total_ticks = read_cpu_timer() - profile_start;
 	assert(total_ticks);
-	uint64_t cpu_freq = estimate_cpu_freq();
+	U64 cpu_freq = estimate_cpu_freq();
 	assert(cpu_freq);
-	double total_ms = 1000 * (total_ticks / (double)cpu_freq);
+	F64 total_ms = 1000 * (total_ticks / (F64)cpu_freq);
 
 	printf("\nTotal time: %f ms %llu ticks (cpu freq %llu)\n", total_ms, total_ticks, cpu_freq);
 
@@ -297,19 +313,19 @@ void end_profile(void) {
 		ProfileBlock block = profile_blocks[i];
 		if (!block.ticks_inclusive) continue;
 
-		double pct_exclusive = 100 * (block.ticks_exclusive / (double)total_ticks);
+		F64 pct_exclusive = 100 * (block.ticks_exclusive / (F64)total_ticks);
 		printf("\t%s[%llu]: %llu (%.2f%%", block.name, block.count, block.ticks_exclusive, pct_exclusive);
 
 		if (block.ticks_exclusive != block.ticks_inclusive) {
-			double pct_inclusive = 100 * (block.ticks_inclusive / (double)total_ticks);
+			F64 pct_inclusive = 100 * (block.ticks_inclusive / (F64)total_ticks);
 			printf(", %.2f%% w/children", pct_inclusive);
 		} 
 
 		printf(")");
 
 		if (block.processed_byte_count) {
-			double megabytes = block.processed_byte_count / (double)(1024*1024);
-			double gigabytes_per_second = (megabytes / 1024) / (block.ticks_inclusive / (double)cpu_freq);
+			F64 megabytes = block.processed_byte_count / (F64)(1024*1024);
+			F64 gigabytes_per_second = (megabytes / 1024) / (block.ticks_inclusive / (F64)cpu_freq);
 			printf(" %.3fmb at %.2fgb/s", megabytes, gigabytes_per_second);
 		}
 
