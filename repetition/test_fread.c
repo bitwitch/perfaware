@@ -27,10 +27,13 @@ typedef enum {
 } TestMode;
 
 typedef struct {
+	U64 total, min, max;
+} RepetitionValue;
+
+typedef struct {
 	U64 test_count;
-	U64 total_time;
-	U64 max_time;
-	U64 min_time;
+	RepetitionValue time;
+	RepetitionValue page_faults;
 } RepetitionTestResults;
 
 typedef struct {
@@ -44,6 +47,7 @@ typedef struct {
 	U32 close_block_count;
 	U64 time_accumulated_this_test;
 	U64 bytes_accumulated_this_test;
+	U64 page_faults_accumulated_this_test;
 	RepetitionTestResults results;
 } RepetitionTester;
 
@@ -62,7 +66,7 @@ static F64 seconds_from_cpu_time(F64 cpu_time, U64 cpu_timer_freq) {
 	return seconds;
 }
 
-static void print_time(char *label, F64 cpu_time, U64 cpu_timer_freq, U64 byte_count) {
+static void print_single_result(char *label, F64 cpu_time, U64 cpu_timer_freq, U64 byte_count, F64 page_faults) {
 	printf("%s: %.0f", label, cpu_time);
 	if (cpu_timer_freq) {
 		F64 seconds = seconds_from_cpu_time(cpu_time, cpu_timer_freq);
@@ -74,17 +78,26 @@ static void print_time(char *label, F64 cpu_time, U64 cpu_timer_freq, U64 byte_c
 			printf(" %fgb/s", best_bandwidth);
 		}
 	}
+
+	if (page_faults) {
+		printf(" PF: %0.4f", page_faults);
+		if (byte_count) {
+			printf(" %0.4fk/fault", (F64)byte_count / (page_faults * 1024.0f));
+		}
+	}
 }
 
 static void print_results(RepetitionTestResults results, U64 cpu_timer_freq, U64 byte_count) {
-	print_time("Min", (F64)results.min_time, cpu_timer_freq, byte_count);
+	print_single_result("Min", (F64)results.time.min, cpu_timer_freq, byte_count, (F64)results.page_faults.min);
 	printf("\n");
 	
-	print_time("Max", (F64)results.max_time, cpu_timer_freq, byte_count);
+	print_single_result("Max", (F64)results.time.max, cpu_timer_freq, byte_count, (F64)results.page_faults.max);
 	printf("\n");
 	
 	if(results.test_count) {
-		print_time("Avg", (F64)results.total_time / (F64)results.test_count, cpu_timer_freq, byte_count);
+		F64 test_count = (F64)results.test_count;
+		print_single_result("Avg", (F64)results.time.total / test_count, 
+			cpu_timer_freq, byte_count, (F64)results.page_faults.total / test_count);
 		printf("\n");
 	}
 }
@@ -109,18 +122,26 @@ static bool is_testing(RepetitionTester *tester) {
 		}
 		if (tester->mode == TEST_MODE_TESTING) {
 			RepetitionTestResults *results = &tester->results;
-			U64 elapsed = tester->time_accumulated_this_test;
 			++results->test_count;
-			results->total_time += elapsed;
-			if (elapsed > results->max_time) {
-				results->max_time = elapsed;
+			U64 page_faults = tester->page_faults_accumulated_this_test;
+			U64 elapsed = tester->time_accumulated_this_test;
+			results->time.total += elapsed;
+			results->page_faults.total += page_faults;
+			if (elapsed > results->time.max) {
+				results->time.max = elapsed;
+				results->page_faults.max = page_faults;
 			}
-			if (elapsed < results->min_time) {
-				results->min_time = elapsed;
+			if (elapsed < results->time.min) {
+				results->time.min = elapsed;
+				results->page_faults.min = page_faults;
 				tester->tests_started_at = current_time;
 				if (tester->print_new_minimums) {
-					print_time("Min", (F64)results->min_time, tester->cpu_timer_freq, tester->bytes_accumulated_this_test);
-					printf("               \r");
+					print_single_result("Min",
+						(F64)results->time.min, 
+						tester->cpu_timer_freq, 
+						tester->bytes_accumulated_this_test,
+						(F64)page_faults);
+					printf("                                        \r");
 				}
 			}
 
@@ -128,6 +149,7 @@ static bool is_testing(RepetitionTester *tester) {
 			tester->close_block_count = 0;
 			tester->time_accumulated_this_test = 0;
 			tester->bytes_accumulated_this_test = 0;
+			tester->page_faults_accumulated_this_test = 0;
 		}
 	}
 
@@ -147,7 +169,7 @@ static void new_test_wave(RepetitionTester *tester, U64 target_byte_count, U64 c
 		tester->target_processed_byte_count = target_byte_count;
 		tester->cpu_timer_freq = cpu_timer_freq;
 		tester->print_new_minimums = true;
-		tester->results.min_time = (U64)-1;
+		tester->results.time.min = (U64)-1;
 	} else if (tester->mode == TEST_MODE_COMPLETED) {
 		tester->mode = TEST_MODE_TESTING;
 		if (tester->target_processed_byte_count != target_byte_count) {
@@ -165,11 +187,14 @@ static void new_test_wave(RepetitionTester *tester, U64 target_byte_count, U64 c
 static void begin_time(RepetitionTester *tester) {
 	++tester->open_block_count;
 	tester->time_accumulated_this_test -= read_cpu_timer(); // implicitly compute difference between begin and end
+	tester->page_faults_accumulated_this_test -= os_process_page_fault_count();
+
 }
 
 static void end_time(RepetitionTester *tester) {
 	++tester->close_block_count;
 	tester->time_accumulated_this_test += read_cpu_timer(); // implicitly compute difference between begin and end
+	tester->page_faults_accumulated_this_test += os_process_page_fault_count();
 }
 
 static void count_bytes(RepetitionTester *tester, U64 byte_count) {
@@ -319,6 +344,36 @@ static void read_via_ReadFile(RepetitionTester *tester, ReadParams *params) {
     }
 }
 
+static void write_all_bytes(RepetitionTester *tester, ReadParams *params) {
+	while (is_testing(tester)) {
+		U8 *buffer = handle_allocation(params);
+
+		begin_time(tester);
+		for (U64 i=0; i<params->file_size; ++i) {
+			buffer[i] = (U8)i;
+		}
+		end_time(tester);
+
+		count_bytes(tester, params->file_size);
+		handle_deallocation(params, buffer);
+	}
+}
+
+static void write_all_bytes_reverse(RepetitionTester *tester, ReadParams *params) {
+	while (is_testing(tester)) {
+		U8 *buffer = handle_allocation(params);
+
+		begin_time(tester);
+		for (U64 i=0; i<params->file_size; ++i) {
+			buffer[(params->file_size - 1) - i] = (U8)i;
+		}
+		end_time(tester);
+
+		count_bytes(tester, params->file_size);
+		handle_deallocation(params, buffer);
+	}
+}
+
 
 
 typedef void ReadOverheadTestFunc(RepetitionTester *tester, ReadParams *params);
@@ -329,6 +384,8 @@ typedef struct {
 } TestFunc;
 
 TestFunc test_functions[] = {
+	{"write_all_bytes", write_all_bytes},
+	{"write_all_bytes_reverse", write_all_bytes_reverse},
 	{"fread", read_via_fread},
 	{"_read", read_via_read},
 	{"ReadFile", read_via_ReadFile},
@@ -340,6 +397,8 @@ int main(int argc, char **argv) {
 		exit(1);
 	}
 	char *file_name = argv[1];
+
+	os_metrics_init();
 
 	RepetitionTester testers[ARRAY_COUNT(test_functions)][ALLOC_KIND_COUNT] = {0};
 	U32 seconds_to_try = 10;
