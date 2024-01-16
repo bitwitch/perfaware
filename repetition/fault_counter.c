@@ -26,8 +26,8 @@ int main(int argc, char **argv) {
 		U64 touch_size = touch_count * page_size;
 		U64 start_fault_count = os_process_page_fault_count();
 		for (U64 i=0; i<touch_size; ++i) {
-			// buffer[i] = 0x69;                     // forward
-			buffer[(buffer_size - 1) - i] = 0x69; // reverse
+			buffer[i] = 0x69;                     // forward
+			// buffer[(buffer_size - 1) - i] = 0x69; // reverse
 		}
 		U64 end_fault_count = os_process_page_fault_count();
 

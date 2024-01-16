@@ -347,14 +347,15 @@ static void read_via_ReadFile(RepetitionTester *tester, ReadParams *params) {
 static void write_all_bytes(RepetitionTester *tester, ReadParams *params) {
 	while (is_testing(tester)) {
 		U8 *buffer = handle_allocation(params);
+		U64 count = params->file_size;
 
 		begin_time(tester);
-		for (U64 i=0; i<params->file_size; ++i) {
+		for (U64 i=0; i<count; ++i) {
 			buffer[i] = (U8)i;
 		}
 		end_time(tester);
 
-		count_bytes(tester, params->file_size);
+		count_bytes(tester, count);
 		handle_deallocation(params, buffer);
 	}
 }
@@ -410,6 +411,8 @@ int main(int argc, char **argv) {
 		exit(1);
 	}
 
+	printf("CPU freq: %fGHz\n", (double)cpu_timer_freq / (double)(1000*1000*1000));
+
 	ReadParams params = { 
 		.file_name = file_name,
 		.file_data = xmalloc(file_size),
@@ -418,7 +421,7 @@ int main(int argc, char **argv) {
 
 	for (;;) {
 		for (int i=0; i<ARRAY_COUNT(test_functions); ++i) {
-				TestFunc test_func = test_functions[i];
+			TestFunc test_func = test_functions[i];
 			for (int j=0; j<ALLOC_KIND_COUNT; ++j) {
 				RepetitionTester *tester = &testers[i][j];
 				params.alloc_kind = (AllocKind)j;
