@@ -1,0 +1,380 @@
+#define _CRT_SECURE_NO_WARNINGS
+#include <stdio.h>
+#include <stdbool.h>
+#include <fcntl.h>
+#include <io.h>
+#include <windows.h>
+
+#include "../common.c"
+
+typedef uint8_t U8;
+typedef uint32_t U32;
+typedef uint64_t U64;
+typedef double F64;
+
+typedef enum {
+	ALLOC_KIND_NONE,
+	ALLOC_KIND_MALLOC,
+	ALLOC_KIND_COUNT
+} AllocKind;
+
+typedef enum { 
+	TEST_MODE_UNINITIALIZED,
+	TEST_MODE_TESTING,
+	TEST_MODE_COMPLETED,
+	TEST_MODE_ERROR,
+} TestMode;
+
+typedef struct {
+	U64 total, min, max;
+} RepetitionValue;
+
+typedef struct {
+	U64 test_count;
+	RepetitionValue time;
+	RepetitionValue page_faults;
+} RepetitionTestResults;
+
+typedef struct {
+	TestMode mode;
+	bool print_new_minimums;
+	U64 target_processed_byte_count;
+	U64 cpu_timer_freq;
+	U64 try_for_time;
+	U64 tests_started_at;
+	U32 open_block_count;
+	U32 close_block_count;
+	U64 time_accumulated_this_test;
+	U64 bytes_accumulated_this_test;
+	U64 page_faults_accumulated_this_test;
+	RepetitionTestResults results;
+} RepetitionTester;
+
+typedef struct {
+	AllocKind alloc_kind;
+	char *file_name;
+	U8 *file_data;
+	U64 file_size;
+} ReadParams;
+
+static F64 seconds_from_cpu_time(F64 cpu_time, U64 cpu_timer_freq) {
+	F64 seconds = 0.0;
+	if (cpu_timer_freq) {
+		seconds = cpu_time / (F64)cpu_timer_freq;
+	}
+	return seconds;
+}
+
+static void print_single_result(char *label, F64 cpu_time, U64 cpu_timer_freq, U64 byte_count, F64 page_faults) {
+	printf("%s: %.0f", label, cpu_time);
+	if (cpu_timer_freq) {
+		F64 seconds = seconds_from_cpu_time(cpu_time, cpu_timer_freq);
+		printf(" (%fms)", 1000.0f * seconds);
+	
+		if (byte_count) {
+			F64 gigabyte = (1024.0f * 1024.0f * 1024.0f);
+			F64 best_bandwidth = byte_count / (gigabyte * seconds);
+			printf(" %fgb/s", best_bandwidth);
+		}
+	}
+
+	if (page_faults) {
+		printf(" PF: %0.4f", page_faults);
+		if (byte_count) {
+			printf(" %0.4fk/fault", (F64)byte_count / (page_faults * 1024.0f));
+		}
+	}
+}
+
+static void print_results(RepetitionTestResults results, U64 cpu_timer_freq, U64 byte_count) {
+	print_single_result("Min", (F64)results.time.min, cpu_timer_freq, byte_count, (F64)results.page_faults.min);
+	printf("\n");
+	
+	print_single_result("Max", (F64)results.time.max, cpu_timer_freq, byte_count, (F64)results.page_faults.max);
+	printf("\n");
+	
+	if(results.test_count) {
+		F64 test_count = (F64)results.test_count;
+		print_single_result("Avg", (F64)results.time.total / test_count, 
+			cpu_timer_freq, byte_count, (F64)results.page_faults.total / test_count);
+		printf("\n");
+	}
+}
+
+static void error(RepetitionTester *tester, char *msg) {
+	tester->mode = TEST_MODE_ERROR;
+	fprintf(stderr, "Error: %s\n", msg);
+}
+
+static bool is_testing(RepetitionTester *tester) {
+	if (tester->mode != TEST_MODE_TESTING)
+		return false;
+
+	U64 current_time = read_cpu_timer();
+
+	if (tester->open_block_count) {
+		if (tester->open_block_count != tester->close_block_count) {
+			error(tester, "Unbalanced begin_time/end_time");
+		}
+		if (tester->bytes_accumulated_this_test != tester->target_processed_byte_count) {
+			error(tester, "Processed byte count mismatch");
+		}
+		if (tester->mode == TEST_MODE_TESTING) {
+			RepetitionTestResults *results = &tester->results;
+			++results->test_count;
+			U64 page_faults = tester->page_faults_accumulated_this_test;
+			U64 elapsed = tester->time_accumulated_this_test;
+			results->time.total += elapsed;
+			results->page_faults.total += page_faults;
+			if (elapsed > results->time.max) {
+				results->time.max = elapsed;
+				results->page_faults.max = page_faults;
+			}
+			if (elapsed < results->time.min) {
+				results->time.min = elapsed;
+				results->page_faults.min = page_faults;
+				tester->tests_started_at = current_time;
+				if (tester->print_new_minimums) {
+					print_single_result("Min",
+						(F64)results->time.min, 
+						tester->cpu_timer_freq, 
+						tester->bytes_accumulated_this_test,
+						(F64)page_faults);
+					printf("                                        \r");
+				}
+			}
+
+			tester->open_block_count = 0;
+			tester->close_block_count = 0;
+			tester->time_accumulated_this_test = 0;
+			tester->bytes_accumulated_this_test = 0;
+			tester->page_faults_accumulated_this_test = 0;
+		}
+	}
+
+	if ((current_time - tester->tests_started_at) > tester->try_for_time) {
+		tester->mode = TEST_MODE_COMPLETED;
+		printf("                                                          \r");
+		print_results(tester->results, tester->cpu_timer_freq, tester->target_processed_byte_count);
+	}
+
+	return true;
+}
+
+static void new_test_wave(RepetitionTester *tester, U64 target_byte_count, U64 cpu_timer_freq, U32 seconds_to_try) {
+	// reset state in tester 
+	if (tester->mode == TEST_MODE_UNINITIALIZED) {
+		tester->mode = TEST_MODE_TESTING;
+		tester->target_processed_byte_count = target_byte_count;
+		tester->cpu_timer_freq = cpu_timer_freq;
+		tester->print_new_minimums = true;
+		tester->results.time.min = (U64)-1;
+	} else if (tester->mode == TEST_MODE_COMPLETED) {
+		tester->mode = TEST_MODE_TESTING;
+		if (tester->target_processed_byte_count != target_byte_count) {
+			error(tester, "target_processed_byte_count changed");
+		}
+		if (tester->cpu_timer_freq != cpu_timer_freq) {
+			error(tester, "cpu_timer_freq changed");
+		}
+	}
+
+	tester->try_for_time = seconds_to_try * cpu_timer_freq;
+	tester->tests_started_at = read_cpu_timer();
+}
+
+static void begin_time(RepetitionTester *tester) {
+	++tester->open_block_count;
+	tester->time_accumulated_this_test -= read_cpu_timer(); // implicitly compute difference between begin and end
+	tester->page_faults_accumulated_this_test -= os_process_page_fault_count();
+
+}
+
+static void end_time(RepetitionTester *tester) {
+	++tester->close_block_count;
+	tester->time_accumulated_this_test += read_cpu_timer(); // implicitly compute difference between begin and end
+	tester->page_faults_accumulated_this_test += os_process_page_fault_count();
+}
+
+static void count_bytes(RepetitionTester *tester, U64 byte_count) {
+	tester->bytes_accumulated_this_test += byte_count;
+}
+
+
+
+
+static char *describe_alloc_kind(AllocKind kind) {
+	char *result;
+	switch (kind) {
+		case ALLOC_KIND_NONE:   result = "";        break;
+		case ALLOC_KIND_MALLOC: result = "malloc";  break;
+		default:                result = "UNKNOWN"; break;
+	}
+	return result;
+}
+
+static U8 *handle_allocation(ReadParams *params) {
+	U8 *result;
+	switch (params->alloc_kind) {
+	case ALLOC_KIND_NONE: 
+		result = params->file_data;
+		break;
+	case ALLOC_KIND_MALLOC: 
+		result = xmalloc(params->file_size);
+		break;
+	default:
+		fprintf(stderr, "Unknown allocation kind in handle_allocation: %d\n", params->alloc_kind);
+		result = NULL;
+		break;
+	}
+	return result;
+}
+
+static void handle_deallocation(ReadParams *params, U8 *buffer) {
+	switch (params->alloc_kind) {
+	case ALLOC_KIND_NONE: 
+		break;
+	case ALLOC_KIND_MALLOC: 
+		free(buffer);
+		break;
+	default:
+		fprintf(stderr, "Unknown allocation kind in handle_deallocation: %d\n", params->alloc_kind);
+		break;
+	}
+}
+
+static void write_all_bytes(RepetitionTester *tester, ReadParams *params) {
+	while (is_testing(tester)) {
+		U8 *buffer = handle_allocation(params);
+		U64 count = params->file_size;
+
+		begin_time(tester);
+		for (U64 i=0; i<count; ++i) {
+			buffer[i] = (U8)i;
+		}
+		end_time(tester);
+
+		count_bytes(tester, count);
+		handle_deallocation(params, buffer);
+	}
+}
+
+void mov_all_bytes_asm(U64 count, U8 *data);
+void nop_all_bytes_asm(U64 count);
+void cmp_all_bytes_asm(U64 count);
+void dec_all_bytes_asm(U64 count);
+#pragma comment (lib, "byte_loops")
+
+static void mov_all_bytes(RepetitionTester *tester, ReadParams *params) {
+	while (is_testing(tester)) {
+		U8 *buffer = handle_allocation(params);
+		U64 count = params->file_size;
+
+		begin_time(tester);
+		mov_all_bytes_asm(count, buffer);
+		end_time(tester);
+
+		count_bytes(tester, count);
+		handle_deallocation(params, buffer);
+	}
+}
+
+static void nop_all_bytes(RepetitionTester *tester, ReadParams *params) {
+	while (is_testing(tester)) {
+		U8 *buffer = handle_allocation(params);
+		U64 count = params->file_size;
+
+		begin_time(tester);
+		nop_all_bytes_asm(count);
+		end_time(tester);
+
+		count_bytes(tester, count);
+		handle_deallocation(params, buffer);
+	}
+}
+
+static void cmp_all_bytes(RepetitionTester *tester, ReadParams *params) {
+	while (is_testing(tester)) {
+		U8 *buffer = handle_allocation(params);
+		U64 count = params->file_size;
+
+		begin_time(tester);
+		cmp_all_bytes_asm(count);
+		end_time(tester);
+
+		count_bytes(tester, count);
+		handle_deallocation(params, buffer);
+	}
+}
+
+static void dec_all_bytes(RepetitionTester *tester, ReadParams *params) {
+	while (is_testing(tester)) {
+		U8 *buffer = handle_allocation(params);
+		U64 count = params->file_size;
+
+		begin_time(tester);
+		dec_all_bytes_asm(count);
+		end_time(tester);
+
+		count_bytes(tester, count);
+		handle_deallocation(params, buffer);
+	}
+}
+
+
+typedef void ReadOverheadTestFunc(RepetitionTester *tester, ReadParams *params);
+
+typedef struct {
+	char *name;
+	ReadOverheadTestFunc *func;
+} TestFunc;
+
+TestFunc test_functions[] = {
+	{"write_all_bytes", write_all_bytes},
+	{"mov_all_bytes", mov_all_bytes},
+	{"nop_all_bytes", nop_all_bytes},
+	{"cmp_all_bytes", cmp_all_bytes},
+	{"dec_all_bytes", dec_all_bytes},
+};
+
+int main(int argc, char **argv) {
+	if (argc != 2) {
+		fprintf(stderr, "Usage: %s [existing filename]\n", argv[0]);
+		exit(1);
+	}
+	char *file_name = argv[1];
+
+	os_metrics_init();
+
+	RepetitionTester testers[ARRAY_COUNT(test_functions)] = {0};
+	U32 seconds_to_try = 10;
+	U64 cpu_timer_freq = estimate_cpu_freq();
+
+	U64 file_size = os_file_size(file_name);
+	if (file_size == 0) {
+		fprintf(stderr, "Error: test data size must be non-zero\n");
+		exit(1);
+	}
+
+	printf("CPU freq: %fGHz\n", (double)cpu_timer_freq / (double)(1000*1000*1000));
+
+	ReadParams params = { 
+		.file_name = file_name,
+		.file_data = xmalloc(file_size),
+		.file_size = file_size,
+	};
+
+	for (;;) {
+		for (int i=0; i<ARRAY_COUNT(test_functions); ++i) {
+			TestFunc test_func = test_functions[i];
+			RepetitionTester *tester = &testers[i];
+			printf("\n--- %s ---\n", test_func.name);
+			new_test_wave(tester, params.file_size, cpu_timer_freq, seconds_to_try);
+			test_func.func(tester, &params);
+		}
+	}
+
+	return 0;
+}
+
+
