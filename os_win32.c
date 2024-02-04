@@ -3,6 +3,8 @@
 #include <windows.h>
 #include <psapi.h>
 
+#pragma comment (lib, "bcrypt.lib")
+
 typedef struct {
 	bool initialized;
 	HANDLE process_handle;
@@ -45,5 +47,26 @@ U64 os_process_page_fault_count(void) {
 		return 0;
 	}
 	return counters.PageFaultCount;
+}
+
+U64 os_max_random_count(void) {
+	// max size of ULONG
+	return 0xffffffff;
+}
+
+bool os_random_bytes(void *dest, U64 dest_size) {
+	U64 cursor = 0;
+	U64 max_rand_count = os_max_random_count();
+
+	while (cursor < dest_size) {
+		BYTE *pos = (BYTE *)dest + cursor;
+		ULONG size = (ULONG)min(dest_size - cursor, max_rand_count);
+		if (BCryptGenRandom(0, pos, size, BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
+			return false;
+		}
+		cursor += size;
+	}
+
+	return true;
 }
 

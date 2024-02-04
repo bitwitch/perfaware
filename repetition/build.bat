@@ -13,9 +13,12 @@ if "%1" == "fault_counter" (
 ) else if "%1" == "test_asm_loops" (
 	cl /W3 /WX /Zi /fsanitize=address /nologo "%source_dir%test_asm_loops.c" /link /LIBPATH:%source_dir%
 	cl /O2 /W3 /WX /Zi /nologo /Fetest_asm_loops_release "%source_dir%test_asm_loops.c" /link /LIBPATH:%source_dir%
-) else (
+) else if "%1" == "test_front_end" (
 	cl /W3 /WX /Zi /fsanitize=address /nologo "%source_dir%test_front_end.c" /link /LIBPATH:%source_dir%
 	cl /O2 /W3 /WX /Zi /nologo /Fetest_front_end_release "%source_dir%test_front_end.c" /link /LIBPATH:%source_dir%
+) else ( 
+	cl /W3 /WX /Zi /fsanitize=address /nologo "%source_dir%test_branch_prediction.c" /link /LIBPATH:%source_dir%
+	cl /O2 /W3 /WX /Zi /nologo /Fetest_branch_prediction_release "%source_dir%test_branch_prediction.c" /link /LIBPATH:%source_dir%
 )
 
 popd

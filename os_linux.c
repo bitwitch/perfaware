@@ -27,3 +27,12 @@ U64 os_file_size(char *filepath) {
 	return stat.st_size;
 }
 
+U64 os_max_random_count(void) {
+	assert(0 && "not implemented");
+	return 0;
+}
+
+bool os_random_bytes(void *dest, U64 dest_size) {
+	assert(0 && "not implemented");
+	return false;
+}
